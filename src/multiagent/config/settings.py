@@ -128,6 +128,14 @@ class Settings(BaseSettings):
         "Declares all agents and their next_agent routing.",
     )
 
+    # Checkpointer
+    checkpointer_db_path: Path = Field(
+        Path("data/checkpoints.db"),
+        description="Path to LangGraph checkpoint database. "
+        "Stores full conversation history per thread_id. "
+        "Separate from the message transport database.",
+    )
+
     # Hello World test configuration
     greeting_message: str = Field(
         "Hello from multiagent",

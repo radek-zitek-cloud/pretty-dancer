@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
+from langgraph.checkpoint.memory import MemorySaver
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
@@ -41,7 +42,14 @@ def test_settings() -> Settings:
         openrouter_api_key="test-key-not-real",  # type: ignore[call-arg]
         prompts_dir=Path("tests/fixtures/prompts"),  # type: ignore[call-arg]
         agents_config_path=Path("tests/fixtures/agents.toml"),  # type: ignore[call-arg]
+        checkpointer_db_path=Path(":memory:"),  # type: ignore[call-arg]
     )
+
+
+@pytest.fixture
+def checkpointer() -> MemorySaver:
+    """In-memory checkpointer for unit tests."""
+    return MemorySaver()
 
 
 @pytest_asyncio.fixture
@@ -87,12 +95,12 @@ def mock_llm(mocker: MockerFixture, mock_llm_response: str) -> AsyncMock:
     Intercepts at the LangChain level so the full LangGraph graph
     executes — only the actual HTTP call is replaced.
 
-    The mock returns an object with a .content attribute, matching
-    the real ChatOpenAI response structure.
+    Returns a real AIMessage so MessagesState's add_messages reducer
+    can process it correctly.
     """
-    mock = AsyncMock(
-        return_value=type("AIMessage", (), {"content": mock_llm_response})()
-    )
+    from langchain_core.messages import AIMessage
+
+    mock = AsyncMock(return_value=AIMessage(content=mock_llm_response))
     mocker.patch(
         "langchain_openai.ChatOpenAI.ainvoke",
         side_effect=mock,

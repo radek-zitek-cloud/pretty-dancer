@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+from langgraph.checkpoint.memory import MemorySaver
 
 from multiagent.config.settings import Settings
 from multiagent.core.agent import LLMAgent
@@ -53,8 +54,9 @@ async def test_researcher_critic_pipeline(
 
     This test makes two real LLM API calls.
     """
-    researcher = LLMAgent("researcher", integration_settings)
-    critic = LLMAgent("critic", integration_settings)
+    checkpointer = MemorySaver()
+    researcher = LLMAgent("researcher", integration_settings, checkpointer)
+    critic = LLMAgent("critic", integration_settings, checkpointer)
 
     researcher_runner = AgentRunner(
         researcher, shared_transport, integration_settings, next_agent="critic"
@@ -92,8 +94,9 @@ async def test_pipeline_thread_continuity(
     Verifies that thread_id is preserved through the full researcher -> critic
     chain — a structural correctness requirement, not an LLM content check.
     """
-    researcher = LLMAgent("researcher", integration_settings)
-    critic = LLMAgent("critic", integration_settings)
+    checkpointer = MemorySaver()
+    researcher = LLMAgent("researcher", integration_settings, checkpointer)
+    critic = LLMAgent("critic", integration_settings, checkpointer)
 
     researcher_runner = AgentRunner(
         researcher, shared_transport, integration_settings, next_agent="critic"
@@ -114,3 +117,40 @@ async def test_pipeline_thread_continuity(
 
     messages = await shared_transport.get_thread(seed.thread_id)
     assert all(msg.thread_id == seed.thread_id for msg in messages)
+
+
+@pytest.mark.integration
+async def test_history_accumulates_across_turns(
+    integration_settings: Settings,
+    shared_transport: SQLiteTransport,
+) -> None:
+    """Verify that conversation history accumulates across agent turns.
+
+    Sends two messages on the same thread to the researcher agent.
+    After the second call, asserts the checkpointer state for the thread
+    contains 4 messages (seed + response 1 + seed 2 + response 2).
+
+    This test makes two real LLM API calls.
+    """
+    checkpointer = MemorySaver()
+    researcher = LLMAgent("researcher", integration_settings, checkpointer)
+    runner = AgentRunner(researcher, shared_transport, integration_settings, next_agent=None)
+
+    seed1 = Message(from_agent="human", to_agent="researcher", body="What is quantum entanglement?")
+    await shared_transport.send(seed1)
+    await run_until_processed(runner, count=1)
+
+    seed2 = Message(
+        from_agent="human",
+        to_agent="researcher",
+        body="How does that relate to quantum computing?",
+        thread_id=seed1.thread_id,  # same thread
+    )
+    await shared_transport.send(seed2)
+    await run_until_processed(runner, count=1)
+
+    # Verify checkpointer accumulated history
+    state = await checkpointer.aget({"configurable": {"thread_id": seed1.thread_id}})
+    assert state is not None
+    messages = state["channel_values"]["messages"]
+    assert len(messages) == 4

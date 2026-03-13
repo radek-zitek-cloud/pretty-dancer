@@ -75,7 +75,7 @@ class TestAgentRunnerRunOnce:
     ) -> None:
         mock_transport.receive.return_value = sample_msg
         await runner.run_once()
-        mock_agent.run.assert_called_once_with(sample_msg.body)
+        mock_agent.run.assert_called_once_with(sample_msg.body, sample_msg.thread_id)
 
     async def test_acks_message_after_successful_processing(
         self, runner: AgentRunner, mock_transport: AsyncMock, sample_msg: Message
@@ -100,6 +100,17 @@ class TestAgentRunnerRunOnce:
         mock_transport.receive.return_value = sample_msg
         await terminal_runner.run_once()
         mock_transport.send.assert_not_called()
+
+    async def test_passes_thread_id_to_agent_run(
+        self,
+        runner: AgentRunner,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        sample_msg: Message,
+    ) -> None:
+        mock_transport.receive.return_value = sample_msg
+        await runner.run_once()
+        mock_agent.run.assert_called_once_with(sample_msg.body, sample_msg.thread_id)
 
     async def test_preserves_thread_id_in_forwarded_message(
         self, runner: AgentRunner, mock_transport: AsyncMock, sample_msg: Message

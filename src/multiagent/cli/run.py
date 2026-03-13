@@ -7,6 +7,7 @@ import sys
 
 import structlog
 import typer
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
@@ -14,6 +15,43 @@ from multiagent.core.agent import LLMAgent
 from multiagent.core.runner import AgentRunner
 from multiagent.logging import configure_logging
 from multiagent.transport import create_transport
+
+
+async def _run(
+    agent_name: str,
+    experiment: str,
+) -> None:
+    """Async entry point for the run command."""
+    settings = load_settings()
+    human_log, json_log = configure_logging(settings, agent_name=agent_name, experiment=experiment)
+    log = structlog.get_logger(__name__)
+
+    if human_log:
+        typer.echo(f"Human log : {human_log}")
+    if json_log:
+        typer.echo(f"JSON log  : {json_log}")
+
+    configs = load_agents_config(settings.agents_config_path)
+    if agent_name not in configs:
+        raise typer.BadParameter(
+            f"Agent '{agent_name}' not found in {settings.agents_config_path}. "
+            f"Available: {', '.join(sorted(configs.keys()))}"
+        )
+
+    agent_config = configs[agent_name]
+    transport = create_transport(settings)
+
+    settings.checkpointer_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    async with AsyncSqliteSaver.from_conn_string(
+        str(settings.checkpointer_db_path)
+    ) as checkpointer:
+        agent = LLMAgent(agent_name, settings, checkpointer)
+        runner = AgentRunner(
+            agent, transport, settings, next_agent=agent_config.next_agent
+        )
+        log.info("agent_starting", agent=agent_name, next_agent=agent_config.next_agent)
+        await runner.run_loop()
 
 
 def run_command(
@@ -34,29 +72,9 @@ def run_command(
         agent_name: The agent name as declared in agents.toml.
         experiment: Optional experiment label for log filenames.
     """
-    settings = load_settings()
-    human_log, json_log = configure_logging(settings, agent_name=agent_name, experiment=experiment)
-    log = structlog.get_logger(__name__)
-
-    if human_log:
-        typer.echo(f"Human log : {human_log}")
-    if json_log:
-        typer.echo(f"JSON log  : {json_log}")
-
-    configs = load_agents_config(settings.agents_config_path)
-    if agent_name not in configs:
-        raise typer.BadParameter(
-            f"Agent '{agent_name}' not found in {settings.agents_config_path}. "
-            f"Available: {', '.join(sorted(configs.keys()))}"
-        )
-
-    config = configs[agent_name]
-    transport = create_transport(settings)
-    agent = LLMAgent(agent_name, settings)
-    runner = AgentRunner(agent, transport, settings, next_agent=config.next_agent)
-
     try:
-        asyncio.run(runner.run_loop())
+        asyncio.run(_run(agent_name, experiment))
     except KeyboardInterrupt:
+        log = structlog.get_logger(__name__)
         log.info("shutdown", reason="keyboard_interrupt")
         sys.exit(0)

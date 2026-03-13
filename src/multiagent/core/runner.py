@@ -76,7 +76,7 @@ class AgentRunner:
         response_text: str | None = None
         for attempt in range(1, self._max_retries + 2):  # +2: retries + initial attempt
             try:
-                response_text = await self._agent.run(msg.body)
+                response_text = await self._agent.run(msg.body, msg.thread_id)
                 break
             except AgentLLMError:
                 if attempt <= self._max_retries:
