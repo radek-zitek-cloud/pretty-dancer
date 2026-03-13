@@ -7,6 +7,8 @@ a startup failure to catch typos early.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -35,6 +37,22 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = Field("INFO", pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
     log_format: str = Field("console", pattern=r"^(console|json)$")
+
+    # Transport
+    transport_backend: str = Field(
+        "sqlite",
+        pattern=r"^(sqlite|terminal)$",
+        description="Active transport adapter. One of: sqlite, terminal.",
+    )
+    sqlite_db_path: Path = Field(
+        Path("data/agents.db"),
+        description="Path to SQLite database file. Use ':memory:' for tests.",
+    )
+    sqlite_poll_interval_seconds: float = Field(
+        1.0,
+        gt=0,
+        description="Seconds between inbox polls when no message is available.",
+    )
 
     # Hello World test configuration
     greeting_message: str = Field(
