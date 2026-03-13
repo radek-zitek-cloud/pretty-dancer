@@ -1,0 +1,2 @@
+- use SERENA mcp server for semantic code tools
+- docs/implementaion-guide.md is a key guideline
