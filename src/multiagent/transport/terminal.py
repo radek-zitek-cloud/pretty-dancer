@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from multiagent.transport.base import Message, Transport
+
+if TYPE_CHECKING:
+    from multiagent.config.settings import Settings
 
 
 class TerminalTransport(Transport):
@@ -19,6 +23,16 @@ class TerminalTransport(Transport):
     No messages are persisted — send() prints to stdout, receive() reads
     from stdin, and ack/known_agents/close are no-ops.
     """
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        """Initialise the terminal transport.
+
+        Args:
+            settings: Accepted for interface consistency with other transports.
+                No settings are currently consumed by TerminalTransport.
+        """
+        # settings accepted for interface consistency with other transports.
+        # No settings are currently consumed by TerminalTransport.
 
     async def receive(self, agent_name: str) -> Message | None:
         """Read one line from stdin as a message to agent_name.

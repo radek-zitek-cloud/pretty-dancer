@@ -1,0 +1,10 @@
+# agents.toml
+# Declares all agents in the system and their routing.
+# next_agent: name of the agent to forward responses to.
+#             Omit or leave unset for terminal agents.
+
+[agents.researcher]
+next_agent = "critic"
+
+[agents.critic]
+# Terminal agent — responses are logged but not forwarded.

@@ -70,7 +70,7 @@ Decision Record and explicit approval.
 | Language | Python 3.12 (pinned) | `TypedDict` improvements, `tomllib` stdlib, best asyncio |
 | Package manager | `uv` | Fastest resolver, native venv, lockfile, cross-platform |
 | Agent framework | LangGraph | Native async, typed state, composable graphs |
-| LLM provider | Anthropic (Claude) | Project context |
+| LLM provider | OpenRouter.ai via `langchain-openai` | Unified gateway to all major models; OpenAI-compatible API |
 | Transport (PoC) | SQLite via stdlib `aiosqlite` | Serverless, persistent, inspectable, zero infra |
 | Transport (dev) | Terminal adapter | Interactive testing without infrastructure |
 | Configuration | `pydantic-settings` | Type-safe, validated, documented, layered env |
@@ -79,7 +79,8 @@ Decision Record and explicit approval.
 | Type checker | `pyright` | Strict mode, best LangGraph / Pydantic v2 support |
 | Test framework | `pytest` + `pytest-asyncio` | Async test support, fixtures, markers |
 | Test mocking | `pytest-mock` | LLM call interception in unit tests |
-| HTTP mocking | `respx` | Mock httpx-based Anthropic SDK calls |
+| HTTP mocking | `respx` | Mock httpx-based OpenAI SDK calls |
+| CLI framework | `typer` + `click` | Type-annotated commands, automatic help, shell completion |
 | Task runner | `just` | Cross-platform, simple syntax, no shell dependency |
 | Pre-commit | `pre-commit` | Enforce ruff and pyright before every commit |
 
@@ -92,10 +93,13 @@ acceptable versions at project inception:
 # pyproject.toml [project.dependencies]
 python = ">=3.12,<3.13"
 langgraph = ">=0.2"
-langchain-anthropic = ">=0.2"
+langchain-openai = ">=0.1"
+openai = ">=1.0"
 pydantic-settings = ">=2.0"
 structlog = ">=24.0"
 aiosqlite = ">=0.20"
+typer = ">=0.12"
+click = ">=8.1"
 ```
 
 ---
@@ -113,6 +117,7 @@ multiagent/                          # repository root
 ├── .env.test                        # committed — test environment overrides
 ├── .gitignore
 ├── .pre-commit-config.yaml
+├── agents.toml                      # agent wiring configuration — names, next_agent routing
 ├── justfile                         # all runnable tasks
 ├── pyproject.toml                   # package metadata, ruff, pyright, pytest config
 ├── uv.lock                          # committed — reproducible dependency resolution
@@ -137,8 +142,9 @@ multiagent/                          # repository root
 │       ├── constants.py             # true constants only (no config values)
 │       │
 │       ├── config/                  # configuration system
-│       │   ├── __init__.py          # exports Settings, get_settings
-│       │   └── settings.py          # pydantic-settings Settings class
+│       │   ├── __init__.py          # exports Settings, get_settings, AgentConfig, load_agents_config
+│       │   ├── settings.py          # pydantic-settings Settings class
+│       │   └── agents.py            # AgentConfig dataclass + load_agents_config()
 │       │
 │       ├── core/                    # agent logic — NO transport, NO I/O imports
 │       │   ├── __init__.py
@@ -162,8 +168,9 @@ multiagent/                          # repository root
 │       │
 │       └── cli/                     # entry points only — thin wrappers
 │           ├── __init__.py
-│           ├── run.py               # `multiagent run` command
-│           └── send.py              # `multiagent send` command (inject a message)
+│           ├── main.py              # typer app definition — `run` and `send` commands
+│           ├── run.py               # implementation of `multiagent run`
+│           └── send.py              # implementation of `multiagent send`
 │
 ├── tests/                           # mirrors src/multiagent/ structure
 │   ├── conftest.py                  # shared fixtures, mock LLM factory
@@ -175,12 +182,13 @@ multiagent/                          # repository root
 │   │   │   ├── test_sqlite.py
 │   │   │   └── test_terminal.py
 │   │   ├── config/
-│   │   │   └── test_settings.py
+│   │   │   ├── test_settings.py
+│   │   │   └── test_agents.py       # AgentConfig loading and validation
 │   │   └── routing/
 │   │       └── test_router.py
 │   └── integration/                 # requires real LLM — gated by marker
-│       ├── conftest.py              # integration-specific fixtures
-│       └── test_agent_pipeline.py
+│       ├── conftest.py              # integration-specific fixtures (shared transport, agents)
+│       └── test_pipeline.py         # full researcher → critic pipeline
 │
 ├── data/                            # runtime data — gitignored except .gitkeep
 │   └── .gitkeep                     # SQLite databases, queue files
@@ -188,9 +196,22 @@ multiagent/                          # repository root
 ├── logs/                            # runtime log files — gitignored except .gitkeep
 │   └── .gitkeep                     # structlog file sink output (when configured)
 │
+├── prompts/                         # agent system prompt files — committed to git
+│   ├── researcher.md                # system prompt for the researcher agent
+│   └── critic.md                    # system prompt for the critic agent
+│
+├── scripts/                         # developer inspection and experiment tools
+│   ├── show_thread.py               # rich-formatted conversation thread from SQLite
+│   ├── show_run.py                  # rich-formatted summary of a single JSONL run file
+│   └── compare_runs.py              # side-by-side rich comparison of two run files
+│
 └── tasks/                           # Claude Code implementation briefs — permanent record
     ├── README.md                    # task lifecycle and conventions
-    └── 001-skeleton.md              # first task: project skeleton
+    ├── 001-skeleton.md              # first task: project skeleton
+    ├── 002-transport.md             # second task: transport layer
+    ├── 003-agent-core.md            # third task: agent core
+    ├── 004-cli-wiring.md            # fourth task: CLI wiring and integration tests
+    └── 005-observability.md         # fifth task: dual logging, JSONL runs, inspection scripts
 ```
 
 ### `.gitignore` — Required Entries
@@ -452,8 +473,15 @@ class Settings(BaseSettings):
     )
 
     # LLM
-    anthropic_api_key: str = Field(..., description="Anthropic API key. Required.")
-    llm_model: str = Field("claude-sonnet-4-20250514", description="LLM model identifier.")
+    openrouter_api_key: str = Field(..., description="OpenRouter API key. Required.")
+    openrouter_base_url: str = Field(
+        "https://openrouter.ai/api/v1",
+        description="OpenRouter API base URL. Override only in tests or when self-hosting.",
+    )
+    llm_model: str = Field(
+        "anthropic/claude-sonnet-4-5",
+        description="OpenRouter model routing string. Format: provider/model-name.",
+    )
     llm_max_tokens: int = Field(1024, ge=1, le=8192, description="Maximum response tokens.")
     llm_timeout_seconds: float = Field(30.0, gt=0, description="LLM call timeout in seconds.")
 
@@ -481,6 +509,71 @@ class Settings(BaseSettings):
     agent_default_timeout_seconds: float = Field(60.0, gt=0)
     agent_max_retries: int = Field(3, ge=0)
     agent_retry_backoff_seconds: float = Field(2.0, gt=0)
+
+    # Prompts
+    prompts_dir: Path = Field(
+        Path("prompts"),
+        description="Directory containing agent system prompt .md files. "
+                    "Each agent loads {prompts_dir}/{agent_name}.md at construction.",
+    )
+
+    # Agent wiring
+    agents_config_path: Path = Field(
+        Path("agents.toml"),
+        description="Path to the agents configuration file. "
+                    "Declares all agents and their next_agent routing.",
+    )
+
+    # Observability — console stream
+    log_console_enabled: bool = Field(
+        True,
+        description="Emit log events to stdout. Disable to suppress all console output.",
+    )
+    log_console_level: str = Field(
+        "INFO",
+        pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
+        description="Minimum log level for console output.",
+    )
+
+    # Observability — human-readable log file stream (.log)
+    log_human_file_enabled: bool = Field(
+        False,
+        description="Write a per-run human-readable log file alongside console output.",
+    )
+    log_human_file_level: str = Field(
+        "INFO",
+        pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
+        description="Minimum log level for the human-readable log file.",
+    )
+
+    # Observability — JSON Lines log file stream (.jsonl)
+    log_json_file_enabled: bool = Field(
+        False,
+        description="Write a per-run JSONL log file. Intended for agent-based analysis.",
+    )
+    log_json_file_level: str = Field(
+        "DEBUG",
+        pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
+        description="Minimum log level for the JSONL log file. Defaults to DEBUG to "
+                    "capture maximum detail for experiment analysis.",
+    )
+
+    # Observability — shared
+    log_dir: Path = Field(
+        Path("logs"),
+        description="Directory for per-run log files. Both .log and .jsonl land here.",
+    )
+    log_trace_llm: bool = Field(
+        False,
+        description="Include full LLM prompt and response content in the JSONL log file. "
+                    "Never emitted to console or human-readable file. "
+                    "Only effective when log_json_file_enabled=True.",
+    )
+    experiment: str = Field(
+        "",
+        description="Optional experiment label included in log filenames. "
+                    "Override per-run with the --experiment CLI flag.",
+    )
 
 
 @lru_cache(maxsize=1)
@@ -513,8 +606,9 @@ def get_settings() -> Settings:
 # ============================================================
 
 # --- LLM ---
-# ANTHROPIC_API_KEY=          # REQUIRED. No default. Must be set in .env or env.
-LLM_MODEL=claude-sonnet-4-20250514
+# OPENROUTER_API_KEY=          # REQUIRED. No default. Must be set in .env or env.
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=anthropic/claude-sonnet-4-5
 LLM_MAX_TOKENS=1024
 LLM_TIMEOUT_SECONDS=30.0
 
@@ -525,13 +619,39 @@ SQLITE_POLL_INTERVAL_SECONDS=1.0
 SQLITE_WAL_MODE=true
 
 # --- LOGGING ---
-LOG_LEVEL=INFO                # DEBUG | INFO | WARNING | ERROR | CRITICAL
-LOG_FORMAT=console            # console | json
+# Legacy single-level settings preserved for backward compatibility.
+# Per-stream settings below take precedence.
+LOG_LEVEL=INFO
+LOG_FORMAT=console
 
 # --- AGENT DEFAULTS ---
 AGENT_DEFAULT_TIMEOUT_SECONDS=60.0
 AGENT_MAX_RETRIES=3
 AGENT_RETRY_BACKOFF_SECONDS=2.0
+
+# --- PROMPTS ---
+PROMPTS_DIR=prompts
+
+# --- AGENT WIRING ---
+AGENTS_CONFIG_PATH=agents.toml
+
+# --- OBSERVABILITY ---
+# Console stream
+LOG_CONSOLE_ENABLED=true
+LOG_CONSOLE_LEVEL=INFO
+
+# Human-readable log file (.log) — disabled by default
+LOG_HUMAN_FILE_ENABLED=false
+LOG_HUMAN_FILE_LEVEL=INFO
+
+# JSON Lines log file (.jsonl) — disabled by default
+LOG_JSON_FILE_ENABLED=false
+LOG_JSON_FILE_LEVEL=DEBUG
+
+# Shared
+LOG_DIR=logs
+LOG_TRACE_LLM=false           # JSONL file only; console and .log never receive trace events
+# EXPERIMENT=                  # optional label in filenames; override with --experiment flag
 ```
 
 ### .env.test (committed to git)
@@ -539,7 +659,7 @@ AGENT_RETRY_BACKOFF_SECONDS=2.0
 ```bash
 # Test environment overrides.
 # Applied automatically when pytest sets ENVIRONMENT=test.
-ANTHROPIC_API_KEY=test-key-not-real
+OPENROUTER_API_KEY=test-key-not-real
 TRANSPORT_BACKEND=sqlite
 SQLITE_DB_PATH=:memory:
 LOG_LEVEL=WARNING
@@ -628,72 +748,86 @@ root
 
 | Level | Rule |
 |---|---|
-| `DEBUG` | Internal state dumps, LLM prompt/response content, every poll tick. Off in production. |
+| `DEBUG` | Internal state dumps, every poll tick. Off in production. |
 | `INFO` | One event per significant operation: message received, sent, agent started/stopped. |
 | `WARNING` | Retry attempted, degraded mode, config fallback used. Actionable but not an error. |
 | `ERROR` | Caught exception that affected an operation. Always include `exc_info=True`. |
 | `CRITICAL` | Unrecoverable. Process is about to exit. |
 
+**LLM trace events** are a special category emitted at `INFO` level with `event="llm_trace"`.
+They carry the full prompt and response content and are only emitted when
+`settings.log_trace_llm` is `True`. They are always written to the JSONL file when file
+logging is enabled, never to the console renderer.
+
 **Rule:** Never log at `ERROR` without an exception context. Never log at `DEBUG` in a
 tight loop without first checking that DEBUG is enabled (performance).
+
+### Three-Stream Output Design
+
+Each stream is independently toggled and independently level-filtered. All three
+share the same structlog processor chain up to the renderer stage.
+
+| Stream | Toggle | Level setting | Renderer | Receives `llm_trace` |
+|---|---|---|---|---|
+| Console | `log_console_enabled` | `log_console_level` | `ConsoleRenderer(colors=True)` | Never |
+| Human file (`.log`) | `log_human_file_enabled` | `log_human_file_level` | `ConsoleRenderer(colors=False)` | Never |
+| JSON file (`.jsonl`) | `log_json_file_enabled` | `log_json_file_level` | `JSONRenderer()` | Yes (when `log_trace_llm=True`) |
+
+`llm_trace` events are suppressed from console and human file via a
+`logging.Filter` subclass applied to those two handlers. The JSONL handler
+receives all events unfiltered.
+
+Both file types use the same timestamp prefix and experiment label, landing
+in `log_dir` side by side:
+
+```
+logs/2026-03-13T14-32-01_baseline.log
+logs/2026-03-13T14-32-01_baseline.jsonl
+```
+
+`configure_logging()` returns a `tuple[Path | None, Path | None]` — the human
+file path and the JSONL file path. Either is `None` if that stream is disabled.
 
 ### Logging Setup
 
 Location: `src/multiagent/logging/setup.py`
 
+`configure_logging()` signature as of Task 005:
+
 ```python
-import logging
-import sys
+def configure_logging(
+    settings: Settings,
+    experiment: str = "",
+) -> tuple[Path | None, Path | None]:
+    """Configure structlog with up to three independent output streams.
 
-import structlog
+    Attaches up to three stdlib logging handlers based on settings:
+      - Console handler: ConsoleRenderer (colours) to stdout
+      - Human file handler: ConsoleRenderer (no colours) to per-run .log file
+      - JSON file handler: JSONRenderer to per-run .jsonl file
 
+    Each handler has its own level filter. llm_trace events are suppressed
+    from console and human file handlers via _SuppressLLMTrace filter.
 
-def configure_logging(level: str = "INFO", fmt: str = "console") -> None:
-    """Configure structlog for the application.
+    The effective experiment label is resolved in order:
+      1. experiment argument (CLI --experiment flag)
+      2. settings.experiment (env var / .env)
+      3. Empty string (timestamp-only filename)
 
     Must be called once at process startup before any logging occurs.
-    Call this from CLI entry points, never from library code.
+    Call from CLI entry points only, never from library code.
 
     Args:
-        level: Minimum log level string (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-        fmt: Renderer format — 'console' for human-readable dev output,
-             'json' for structured machine-parseable production output.
+        settings: Validated application settings.
+        experiment: Experiment label from CLI flag. Overrides settings.experiment.
+
+    Returns:
+        Tuple of (human_log_path, json_log_path). Either is None if that
+        stream is disabled.
+
+    Raises:
+        OSError: If the log directory cannot be created.
     """
-    shared_processors: list[structlog.types.Processor] = [
-        structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-
-    if fmt == "json":
-        renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
-    else:
-        renderer = structlog.dev.ConsoleRenderer(colors=True)
-
-    structlog.configure(
-        processors=[
-            *shared_processors,
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-        ],
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_on_first_use=True,
-    )
-
-    formatter = structlog.stdlib.ProcessorFormatter(
-        foreign_pre_chain=shared_processors,
-        processors=[structlog.stdlib.ProcessorFormatter.remove_processors_meta, renderer],
-    )
-
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(formatter)
-
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.addHandler(handler)
-    root_logger.setLevel(level.upper())
 ```
 
 ---
@@ -1435,23 +1569,49 @@ test-all:
 
 # ── Application ────────────────────────────────────────────────────────────
 
-# Run the agent system
-run *args:
-    uv run python -m multiagent.cli.run {{args}}
+# Run a named agent (polls for messages until interrupted)
+run agent experiment="":
+    uv run multiagent run {{agent}} {{if experiment != "" { "--experiment " + experiment } else { "" }}}
 
-# Inject a message into the SQLite transport for a given agent
+# Inject a message into the transport for a named agent
 send agent body:
-    uv run python -m multiagent.cli.send --to {{agent}} --body "{{body}}"
+    uv run multiagent send {{agent}} "{{body}}"
 
 # ── Database ───────────────────────────────────────────────────────────────
 
-# Show all messages in the SQLite transport (requires sqlite3 CLI)
-db-view:
-    sqlite3 data/agents.db "SELECT id, from_agent, to_agent, processed, body FROM messages ORDER BY created_at;"
+# Show last N messages across all agents
+db-tail n="20":
+    sqlite3 data/agents.db "SELECT id, from_agent, to_agent, substr(body,1,60) as body, processed_at FROM messages ORDER BY created_at DESC LIMIT {{n}};"
+
+# Show all pending (unprocessed) messages by agent
+db-pending:
+    sqlite3 data/agents.db "SELECT to_agent, count(*) as pending FROM messages WHERE processed_at IS NULL GROUP BY to_agent;"
+
+# Show per-agent message counts and last activity
+db-agents:
+    sqlite3 data/agents.db "SELECT to_agent, count(*) as total, sum(processed_at IS NOT NULL) as done, max(created_at) as last_seen FROM messages GROUP BY to_agent;"
 
 # Clear all messages from the transport database
 db-clear:
     sqlite3 data/agents.db "DELETE FROM messages;"
+
+# ── Inspection scripts ─────────────────────────────────────────────────────
+
+# Show a conversation thread from SQLite, formatted with rich
+thread thread_id:
+    uv run python scripts/show_thread.py {{thread_id}}
+
+# Show a summary of a single run log file
+run-summary log_file:
+    uv run python scripts/show_run.py {{log_file}}
+
+# Compare two run log files side by side
+compare log1 log2:
+    uv run python scripts/compare_runs.py {{log1}} {{log2}}
+
+# List all run log files with metadata
+runs:
+    @ls -lt logs/*.jsonl 2>/dev/null || echo "No run logs found in logs/"
 
 # ── Documentation ──────────────────────────────────────────────────────────
 
@@ -1666,10 +1826,13 @@ open("file.txt", "r", encoding="utf-8")
 | Package | Purpose | Import As |
 |---|---|---|
 | `langgraph` | Agent graph orchestration | `from langgraph.graph import StateGraph` |
-| `langchain-anthropic` | Anthropic LLM client for LangGraph | `from langchain_anthropic import ChatAnthropic` |
+| `langchain-openai` | OpenAI-compatible LLM client for LangGraph | `from langchain_openai import ChatOpenAI` |
+| `openai` | Underlying SDK used by langchain-openai | transitive — do not import directly |
 | `pydantic-settings` | Configuration with validation | `from pydantic_settings import BaseSettings` |
 | `structlog` | Structured logging | `import structlog` |
 | `aiosqlite` | Async SQLite access | `import aiosqlite` |
+| `typer` | Type-annotated CLI framework | `import typer` |
+| `click` | CLI primitives underlying typer | transitive — do not import directly |
 
 ### Development Dependencies
 
@@ -1682,6 +1845,7 @@ open("file.txt", "r", encoding="utf-8")
 | `pytest-mock` | Mock and spy fixtures | `mocker` fixture |
 | `respx` | Mock httpx HTTP calls | `respx.mock` context manager |
 | `pre-commit` | Git hook runner | `just setup` |
+| `rich` | Terminal formatting for inspection scripts | `scripts/` only — never imported in `src/` |
 
 ### Explicitly Excluded
 

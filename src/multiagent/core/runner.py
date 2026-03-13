@@ -40,6 +40,16 @@ class AgentRunner:
         self._poll_interval = settings.sqlite_poll_interval_seconds
         self._log = structlog.get_logger().bind(agent=agent.name)
 
+    @property
+    def agent(self) -> LLMAgent:
+        """The LLMAgent this runner drives."""
+        return self._agent
+
+    @property
+    def transport(self) -> Transport:
+        """The Transport this runner uses for message I/O."""
+        return self._transport
+
     async def run_once(self) -> bool:
         """Fetch and process one message from the transport inbox.
 

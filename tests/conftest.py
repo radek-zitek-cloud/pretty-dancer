@@ -37,6 +37,7 @@ def test_settings() -> Settings:
         sqlite_poll_interval_seconds=1.0,  # type: ignore[call-arg]
         openrouter_api_key="test-key-not-real",  # type: ignore[call-arg]
         prompts_dir=Path("tests/fixtures/prompts"),  # type: ignore[call-arg]
+        agents_config_path=Path("tests/fixtures/agents.toml"),  # type: ignore[call-arg]
     )
 
 
