@@ -524,6 +524,14 @@ class Settings(BaseSettings):
                     "Declares all agents and their next_agent routing.",
     )
 
+    # Checkpointer
+    checkpointer_db_path: Path = Field(
+        Path("data/checkpoints.db"),
+        description="Path to LangGraph checkpoint database. "
+                    "Stores full conversation history per thread_id. "
+                    "Separate from the message transport database.",
+    )
+
     # Observability — console stream
     log_console_enabled: bool = Field(
         True,
@@ -781,9 +789,16 @@ Both file types use the same timestamp prefix and experiment label, landing
 in `log_dir` side by side:
 
 ```
-logs/2026-03-13T14-32-01_baseline.log
-logs/2026-03-13T14-32-01_baseline.jsonl
+logs/2026-03-13T14-32-01_progressive_debate.log
+logs/2026-03-13T14-32-01_progressive_debate.jsonl
+logs/2026-03-13T14-32-01_conservative_debate.log
+logs/2026-03-13T14-32-01_conservative_debate.jsonl
 ```
+
+Filename construction: `{timestamp}_{agent_name}[_{experiment}].{ext}`
+
+Concurrent agents produce separate, identifiable files. The agent name is always
+present. The experiment label is omitted when empty.
 
 `configure_logging()` returns a `tuple[Path | None, Path | None]` — the human
 file path and the JSONL file path. Either is `None` if that stream is disabled.
@@ -797,6 +812,7 @@ Location: `src/multiagent/logging/setup.py`
 ```python
 def configure_logging(
     settings: Settings,
+    agent_name: str = "",
     experiment: str = "",
 ) -> tuple[Path | None, Path | None]:
     """Configure structlog with up to three independent output streams.
@@ -812,13 +828,15 @@ def configure_logging(
     The effective experiment label is resolved in order:
       1. experiment argument (CLI --experiment flag)
       2. settings.experiment (env var / .env)
-      3. Empty string (timestamp-only filename)
+      3. Empty string (omitted from filename)
 
     Must be called once at process startup before any logging occurs.
     Call from CLI entry points only, never from library code.
 
     Args:
         settings: Validated application settings.
+        agent_name: Name of the running agent. Always included in filenames
+            so concurrent agents produce separate, identifiable log files.
         experiment: Experiment label from CLI flag. Overrides settings.experiment.
 
     Returns:
@@ -1103,6 +1121,25 @@ CREATE INDEX IF NOT EXISTS idx_thread
 
 WAL mode and synchronous=NORMAL are applied at connection time for concurrent
 read performance. Both are configured via settings.
+
+### Checkpointer Database
+
+LangGraph conversation state is persisted in a separate SQLite database:
+`data/checkpoints.db` (configurable via `CHECKPOINTER_DB_PATH`).
+
+This database is managed entirely by `AsyncSqliteSaver` from
+`langgraph-checkpoint-sqlite`. The schema is internal to LangGraph — never
+query or write to it directly. Use `checkpointer.aget()` for inspection in tests.
+
+**Why separate from `agents.db`:** The message transport database and the LangGraph
+checkpoint database have different owners, different schemas, and different lifecycle
+concerns. Mixing them would couple two independent subsystems.
+
+**Lifecycle ownership:** The CLI entry point (`cli/run.py`) owns the checkpointer.
+It is opened via `async with AsyncSqliteSaver.from_conn_string(...)` and closed
+when the process exits. `LLMAgent` receives the checkpointer as a constructor
+parameter typed as `BaseCheckpointSaver`. In unit tests, `MemorySaver()` is
+injected instead — no file I/O, no async setup.
 
 ---
 
