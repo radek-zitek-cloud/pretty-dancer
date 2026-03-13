@@ -1,4 +1,4 @@
-set shell := ["powershell", "-Command"]
+# set shell := ["powershell", "-Command"]
 
 # Default — list all tasks
 default:

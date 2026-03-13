@@ -32,24 +32,29 @@ class _SuppressLLMTrace(logging.Filter):
         return "llm_trace" not in record.getMessage()
 
 
-def _build_filename(experiment: str) -> str:
-    """Build a per-run filename prefix from current timestamp and experiment label.
+def _build_filename(agent_name: str, experiment: str) -> str:
+    """Build a per-run filename prefix from current timestamp, agent name, and experiment label.
 
     Args:
-        experiment: Optional experiment label. Empty string for timestamp-only.
+        agent_name: Agent name included in every log filename.
+        experiment: Optional experiment label. Empty string to omit.
 
     Returns:
-        Filename prefix like '2026-03-13T14-32-01' or '2026-03-13T14-32-01_prompt-v2'.
+        Filename prefix like '2026-03-13T14-32-01_progressive' or
+        '2026-03-13T14-32-01_progressive_prompt-v2'.
     """
     ts = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H-%M-%S")
+    safe_agent = agent_name.replace(" ", "-")
+    base = f"{ts}_{safe_agent}"
     if experiment:
         safe_label = experiment.replace(" ", "-")
-        return f"{ts}_{safe_label}"
-    return ts
+        return f"{base}_{safe_label}"
+    return base
 
 
 def configure_logging(
     settings: Settings,
+    agent_name: str = "",
     experiment: str = "",
 ) -> tuple[Path | None, Path | None]:
     """Configure structlog with up to three independent output streams.
@@ -67,6 +72,7 @@ def configure_logging(
 
     Args:
         settings: Validated application settings.
+        agent_name: Agent name included in log filenames for uniqueness.
         experiment: Experiment label from CLI flag. Overrides settings.experiment
             when non-empty.
 
@@ -125,7 +131,7 @@ def configure_logging(
     filename_prefix = ""
     if settings.log_human_file_enabled or settings.log_json_file_enabled:
         settings.log_dir.mkdir(parents=True, exist_ok=True)
-        filename_prefix = _build_filename(effective_experiment)
+        filename_prefix = _build_filename(agent_name, effective_experiment)
 
     # Human-readable file stream (.log)
     if settings.log_human_file_enabled:

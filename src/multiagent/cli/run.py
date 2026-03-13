@@ -35,7 +35,7 @@ def run_command(
         experiment: Optional experiment label for log filenames.
     """
     settings = load_settings()
-    human_log, json_log = configure_logging(settings, experiment=experiment)
+    human_log, json_log = configure_logging(settings, agent_name=agent_name, experiment=experiment)
     log = structlog.get_logger(__name__)
 
     if human_log:
