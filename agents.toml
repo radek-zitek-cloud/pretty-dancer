@@ -1,10 +1,11 @@
 # agents.toml
-# Declares all agents in the system and their routing.
-# next_agent: name of the agent to forward responses to.
-#             Omit or leave unset for terminal agents.
+# Circular debate: progressive and conservative respond to each other indefinitely.
+# Terminate with Ctrl-C. Runs until interrupted — monitor cost in LangSmith.
+#
+# WARNING: no termination condition. Each exchange makes two real LLM calls.
 
-[agents.researcher]
-next_agent = "critic"
+[agents.progressive]
+next_agent = "conservative"
 
-[agents.critic]
-# Terminal agent — responses are logged but not forwarded.
+[agents.conservative]
+next_agent = "progressive"
