@@ -1,10 +1,28 @@
-# Pretty Dancer
-#
-# ignore data and logs directories
+# Local configuration — never commit secrets
+.env
 
-data/
-logs/
+# Runtime data — all contents ignored, folder tracked via .gitkeep
+data/*
+!data/.gitkeep
 
-#
-#
-#
+# Log files — all contents ignored, folder tracked via .gitkeep
+logs/*
+!logs/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# uv / packaging
+.venv/
+*.egg-info/
+dist/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
