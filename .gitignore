@@ -1,0 +1,10 @@
+# Pretty Dancer
+#
+# ignore data and logs directories
+
+data/
+logs/
+
+#
+#
+#
