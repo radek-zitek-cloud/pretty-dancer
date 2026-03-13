@@ -54,6 +54,26 @@ class Settings(BaseSettings):
         description="Seconds between inbox polls when no message is available.",
     )
 
+    # LLM
+    openrouter_api_key: str = Field(..., description="OpenRouter API key. Required.")
+    openrouter_base_url: str = Field(
+        "https://openrouter.ai/api/v1",
+        description="OpenRouter API base URL. Override only in tests or when self-hosting.",
+    )
+    llm_model: str = Field(
+        "anthropic/claude-sonnet-4-5",
+        description="OpenRouter model routing string. Format: provider/model-name.",
+    )
+    llm_max_tokens: int = Field(1024, ge=1, le=8192, description="Maximum response tokens.")
+    llm_timeout_seconds: float = Field(30.0, gt=0, description="LLM call timeout in seconds.")
+
+    # Prompts
+    prompts_dir: Path = Field(
+        Path("prompts"),
+        description="Directory containing agent system prompt .md files. "
+        "Each agent loads {prompts_dir}/{agent_name}.md at construction.",
+    )
+
     # Hello World test configuration
     greeting_message: str = Field(
         "Hello from multiagent",

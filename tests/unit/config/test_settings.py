@@ -20,6 +20,7 @@ class TestSettingsValidation:
         with pytest.raises(ValidationError):
             Settings(
                 greeting_secret="secret",  # type: ignore[call-arg]
+                openrouter_api_key="test-key",  # type: ignore[call-arg]
                 log_level="INVALID",  # type: ignore[call-arg]
             )
 
@@ -27,6 +28,7 @@ class TestSettingsValidation:
         with pytest.raises(ValidationError):
             Settings(
                 greeting_secret="secret",  # type: ignore[call-arg]
+                openrouter_api_key="test-key",  # type: ignore[call-arg]
                 log_format="yaml",  # type: ignore[call-arg]
             )
 
@@ -34,6 +36,7 @@ class TestSettingsValidation:
         with pytest.raises(ValidationError):
             Settings(
                 greeting_secret="secret",  # type: ignore[call-arg]
+                openrouter_api_key="test-key",  # type: ignore[call-arg]
                 app_env="staging",  # type: ignore[call-arg]
             )
 
@@ -41,6 +44,7 @@ class TestSettingsValidation:
         with pytest.raises(ValidationError):
             Settings(
                 greeting_secret="secret",  # type: ignore[call-arg]
+                openrouter_api_key="test-key",  # type: ignore[call-arg]
                 unknown_extra_field="value",  # type: ignore[call-arg]
             )
 
