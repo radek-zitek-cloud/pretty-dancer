@@ -24,6 +24,7 @@ dev = [
     "pytest-cov",
     "respx",
     "pre-commit",
+    "rich>=13.0",
 ]
 
 [project.scripts]

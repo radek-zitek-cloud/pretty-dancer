@@ -28,8 +28,11 @@ def test_settings() -> Settings:
     return Settings(
         app_name="multiagent",  # type: ignore[call-arg]
         app_env="development",  # type: ignore[call-arg]
-        log_level="INFO",  # type: ignore[call-arg]
-        log_format="console",  # type: ignore[call-arg]
+        log_console_enabled=True,  # type: ignore[call-arg]
+        log_console_level="WARNING",  # type: ignore[call-arg]
+        log_human_file_enabled=False,  # type: ignore[call-arg]
+        log_json_file_enabled=False,  # type: ignore[call-arg]
+        log_trace_llm=False,  # type: ignore[call-arg]
         greeting_message="Hello from test config",  # type: ignore[call-arg]
         greeting_secret="test-secret-not-real",  # type: ignore[call-arg]
         transport_backend="sqlite",  # type: ignore[call-arg]

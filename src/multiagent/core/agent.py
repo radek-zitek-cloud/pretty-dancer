@@ -27,6 +27,7 @@ class LLMAgent:
     def __init__(self, name: str, settings: Settings) -> None:
         """Initialise the agent with a name and application settings."""
         self.name = name
+        self._settings = settings
         self._log = structlog.get_logger().bind(agent=name)
         self._system_prompt = self._load_prompt(name, settings.prompts_dir)
         self._llm = ChatOpenAI(
@@ -96,6 +97,15 @@ class LLMAgent:
             ])
             output = str(response.content)
             self._log.debug("llm_call_complete", output_chars=len(output))
+            if self._settings.log_trace_llm:
+                self._log.info(
+                    "llm_trace",
+                    prompt=state["input"],
+                    system_prompt=self._system_prompt,
+                    response=output,
+                    input_chars=len(state["input"]),
+                    output_chars=len(output),
+                )
             return {"input": state["input"], "output": output}
 
         graph: StateGraph[AgentState] = StateGraph(AgentState)

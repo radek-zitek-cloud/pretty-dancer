@@ -34,9 +34,56 @@ class Settings(BaseSettings):
     app_name: str = Field("multiagent")
     app_env: str = Field("development", pattern=r"^(development|test|production)$")
 
-    # Logging
-    log_level: str = Field("INFO", pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
-    log_format: str = Field("console", pattern=r"^(console|json)$")
+    # Observability — console stream
+    log_console_enabled: bool = Field(
+        True,
+        description="Emit log events to stdout. Disable to suppress all console output.",
+    )
+    log_console_level: str = Field(
+        "INFO",
+        pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
+        description="Minimum log level for console output.",
+    )
+
+    # Observability — human-readable log file stream (.log)
+    log_human_file_enabled: bool = Field(
+        False,
+        description="Write a per-run human-readable log file alongside console output.",
+    )
+    log_human_file_level: str = Field(
+        "INFO",
+        pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
+        description="Minimum log level for the human-readable log file.",
+    )
+
+    # Observability — JSON Lines log file stream (.jsonl)
+    log_json_file_enabled: bool = Field(
+        False,
+        description="Write a per-run JSONL log file. Intended for agent-based analysis.",
+    )
+    log_json_file_level: str = Field(
+        "DEBUG",
+        pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
+        description="Minimum log level for the JSONL log file. Defaults to DEBUG to "
+        "capture maximum detail for experiment analysis.",
+    )
+
+    # Observability — shared
+    log_dir: Path = Field(
+        Path("logs"),
+        description="Directory for per-run log files. Both .log and .jsonl land here.",
+    )
+    log_trace_llm: bool = Field(
+        False,
+        description="Include full LLM prompt and response content in the JSONL log file. "
+        "Never emitted to console or human-readable file. "
+        "Only effective when log_json_file_enabled=True.",
+    )
+    experiment: str = Field(
+        "",
+        description="Optional experiment label included in log filenames. "
+        "Override per-run with the --experiment CLI flag.",
+    )
 
     # Transport
     transport_backend: str = Field(
