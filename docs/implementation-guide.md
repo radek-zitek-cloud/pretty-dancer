@@ -798,26 +798,52 @@ class Message:
     Instances of this class cross the transport/core boundary. The core layer
     receives and produces Message objects; it never touches transport internals.
 
+    The to_agent field accepts a single agent name, a list of agent names, or
+    the broadcast sentinel "*". The transport layer resolves lists and "*" into
+    individual per-recipient rows before persistence — the dataclass itself
+    carries the caller's original addressing intent.
+
+    All timestamps are UTC. Timestamps are set by the transport at the
+    relevant lifecycle event — never by the caller except created_at.
+
     Attributes:
-        from_agent: Name of the sending agent or 'human' for external injection.
-        to_agent: Name of the intended recipient agent.
-        body: The message payload — plain text.
-        subject: Optional topic label. Used by routing logic, not the agent core.
-        thread_id: UUID string grouping related messages into a conversation.
-            Always populated — defaults to a new UUID if not provided.
-        parent_id: Database ID of the message this is a reply to, if any.
-        id: Database-assigned identifier. None until the message is persisted.
-        created_at: Timestamp of creation. None until the message is persisted.
+        from_agent: Sending agent name, or "human" for external injection.
+        to_agent: Recipient — single name, list of names, or "*" for broadcast.
+        body: Message payload — plain text.
+        subject: Optional topic label for routing. Empty string if unused.
+        thread_id: UUID grouping all messages in one conversation chain.
+            Defaults to a new UUID — callers should pass an existing thread_id
+            when continuing a thread.
+        parent_id: Database id of the message this is a direct reply to.
+            None for thread-initiating messages.
+        id: Database-assigned integer id. None until persisted.
+        created_at: UTC timestamp of object construction. Set by caller.
+        sent_at: UTC timestamp when transport.send() persisted the message.
+            Set by transport — None until send() is called.
+        received_at: UTC timestamp when transport.receive() fetched this message.
+            Set by transport — None until an agent polls and receives it.
+        processed_at: UTC timestamp when transport.ack() was called.
+            Set by transport — None until processing is confirmed complete.
     """
 
     from_agent: str
-    to_agent: str
+    to_agent: str | list[str]
     body: str
     subject: str = ""
     thread_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     parent_id: int | None = None
     id: int | None = None
-    created_at: datetime | None = None
+    created_at: datetime | None = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    sent_at: datetime | None = None
+    received_at: datetime | None = None
+    processed_at: datetime | None = None
+```
+
+**Import note:** `timezone` must be imported from `datetime`:
+```python
+from datetime import datetime, timezone
 ```
 
 ### The Transport Abstract Base Class
@@ -831,6 +857,11 @@ class Transport(ABC):
 
     Concrete adapters implement this interface. Agent code depends only on
     this abstraction — never on concrete adapter classes.
+
+    Fanout semantics: when message.to_agent is a list or "*", send() expands
+    the message into one delivery per resolved recipient before persistence.
+    The abstract interface accepts the full addressing intent; adapters own
+    the expansion logic.
     """
 
     @abstractmethod
@@ -839,6 +870,8 @@ class Transport(ABC):
 
         Non-blocking — returns None immediately if no message is available.
         The runner loop is responsible for polling and backoff.
+
+        Sets received_at on the returned Message to UTC now.
 
         Args:
             agent_name: The name of the agent whose mailbox to check.
@@ -854,22 +887,45 @@ class Transport(ABC):
     async def send(self, message: Message) -> None:
         """Deliver a message to the transport backend.
 
+        Handles fanout: if message.to_agent is a list, one row is written
+        per recipient. If message.to_agent is "*", the transport resolves
+        the recipient list from previously seen agent names and fans out.
+
+        Sets sent_at on each persisted row to UTC now.
+
         Args:
-            message: The fully constructed Message to deliver.
+            message: The Message to deliver. to_agent may be str, list, or "*".
 
         Raises:
-            MessageDeliveryError: If delivery fails after all retries.
+            MessageDeliveryError: If persistence fails.
+            TransportConnectionError: If the backend is unavailable.
         """
 
     @abstractmethod
     async def ack(self, message_id: int) -> None:
         """Mark a message as processed so it is not delivered again.
 
+        Sets processed_at on the row to UTC now.
+
         Args:
             message_id: The id of the Message to acknowledge.
 
         Raises:
-            TransportError: If the acknowledgement cannot be persisted.
+            MessageAcknowledgementError: If the ack cannot be persisted.
+        """
+
+    @abstractmethod
+    async def known_agents(self) -> list[str]:
+        """Return all agent names seen as to_agent recipients.
+
+        Used by send() to resolve broadcast "*" to a concrete recipient list.
+        Returns an empty list if no messages have been persisted yet.
+
+        Returns:
+            Sorted list of distinct agent name strings.
+
+        Raises:
+            TransportConnectionError: If the backend is unavailable.
         """
 
     @abstractmethod
@@ -882,23 +938,31 @@ class Transport(ABC):
 The schema is owned by `SQLiteTransport` and applied via `_ensure_schema()` on
 first connection. No external migration tool is used for the PoC.
 
+All timestamp columns are `TEXT` in ISO8601 UTC format
+(`2026-03-13T10:00:00.000000+00:00`). SQLite has no native datetime type.
+ISO8601 strings sort correctly as text and round-trip through
+`datetime.fromisoformat()` without loss.
+
 ```sql
 CREATE TABLE IF NOT EXISTS messages (
-    id          INTEGER  PRIMARY KEY AUTOINCREMENT,
-    from_agent  TEXT     NOT NULL,
-    to_agent    TEXT     NOT NULL,
-    subject     TEXT     NOT NULL DEFAULT '',
-    body        TEXT     NOT NULL,
-    thread_id   TEXT     NOT NULL,
-    parent_id   INTEGER  REFERENCES messages(id),
-    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    read_at     DATETIME,
-    processed   BOOLEAN  NOT NULL DEFAULT FALSE
+    id            INTEGER  PRIMARY KEY AUTOINCREMENT,
+    from_agent    TEXT     NOT NULL,
+    to_agent      TEXT     NOT NULL,          -- always single agent after fanout
+    subject       TEXT     NOT NULL DEFAULT '',
+    body          TEXT     NOT NULL DEFAULT '',
+    thread_id     TEXT     NOT NULL,
+    parent_id     INTEGER  REFERENCES messages(id),
+    created_at    TEXT     NOT NULL,          -- UTC ISO8601, set by caller
+    sent_at       TEXT,                       -- UTC ISO8601, set by transport.send()
+    received_at   TEXT,                       -- UTC ISO8601, set by transport.receive()
+    processed_at  TEXT                        -- UTC ISO8601, set by transport.ack()
 );
 
+-- Hot path: every agent poll hits this index
 CREATE INDEX IF NOT EXISTS idx_inbox
-    ON messages(to_agent, processed, created_at);
+    ON messages(to_agent, processed_at, created_at);
 
+-- Thread reconstruction for debugging and conversation history
 CREATE INDEX IF NOT EXISTS idx_thread
     ON messages(thread_id, created_at);
 ```
@@ -1193,28 +1257,74 @@ just test-all          # all tests
 
 ## 12. Git Workflow
 
-### Repository Initialization
+### Repository State
 
-The repository must be initialized before any development begins. All work happens
-in branches. No commits directly to `main`.
+The repository is initialised, has a remote, and `master` is the stable integration
+branch. All work happens in feature branches. No commits directly to `master`.
 
 ```bash
-git init multiagent
-cd multiagent
-git commit --allow-empty -m "chore: initialize repository"
+# Verify remote and branch state before starting any task
+git remote -v
+git branch -a
+git worktree list
 ```
 
 ### Branching Convention
 
 ```
-main                    — stable, always passing, protected
-develop                 — integration branch, merges to main via PR
+master                  — stable, always passing, protected
 feature/<short-name>    — new functionality
 fix/<short-name>        — bug fixes
 docs/<short-name>       — documentation only changes
 chore/<short-name>      — tooling, dependencies, config
 adr/<record-number>     — architecture decision records
 ```
+
+**Note:** This project uses `master` as the integration branch, not `main`.
+This is the established convention for this repository and must not be changed.
+
+### Starting a New Task — Standard Sequence
+
+Every task follows this sequence before writing a single line of code:
+
+```bash
+# 1. Ensure master is up to date with remote
+git checkout master
+git pull origin master
+
+# 2. Create worktree for the new task branch
+git worktree add ../multiagent-<slug> feature/<slug>
+
+# 3. Confirm state
+git worktree list
+```
+
+### Completing a Task — Standard Sequence
+
+```bash
+# 1. Ensure all acceptance criteria pass in the worktree
+cd ../multiagent-<slug>
+just check && just test
+
+# 2. Push branch to remote
+git push origin feature/<slug>
+
+# 3. Merge to master locally
+git checkout master
+git merge feature/<slug> --ff-only
+
+# 4. Push master to remote
+git push origin master
+
+# 5. Remove worktree
+git worktree remove ../multiagent-<slug>
+
+# 6. Delete merged branch
+git branch -d feature/<slug>
+```
+
+`--ff-only` is mandatory on merge. If the merge cannot fast-forward, the branch
+has diverged from master and must be rebased before merging.
 
 ### Git Worktrees — Parallel Development
 
@@ -1223,12 +1333,12 @@ directories without stashing or switching. Use for parallel workstreams:
 
 ```bash
 # From the repository root
-git worktree add ../multiagent-transport feature/sqlite-transport
+git worktree add ../multiagent-transport feature/transport
 git worktree add ../multiagent-core feature/agent-core
 
 # Each directory is an independent working tree on its branch
 cd ../multiagent-transport
-# ... work on sqlite transport ...
+# ... work on transport ...
 
 cd ../multiagent-core
 # ... work on agent core simultaneously ...
