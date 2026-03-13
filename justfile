@@ -1,3 +1,5 @@
+set shell := ["powershell", "-Command"]
+
 # Default — list all tasks
 default:
     @just --list
