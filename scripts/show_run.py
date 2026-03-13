@@ -89,19 +89,27 @@ def main() -> None:
     trace_events = [e for e in events if e.get("event") == "llm_trace"]
     if trace_events:
         console.print("[bold]LLM Calls[/bold]")
+        all_input_tokens: list[int | None] = []
+        all_output_tokens: list[int | None] = []
         for i, te in enumerate(trace_events, 1):
             agent = str(te.get("agent", "?"))
             ts = str(te.get("timestamp", "?"))
             input_chars = te.get("input_chars", "?")
             output_chars = te.get("output_chars", "?")
+            input_tokens = te.get("input_tokens")
+            output_tokens = te.get("output_tokens")
+            all_input_tokens.append(input_tokens if isinstance(input_tokens, int) else None)
+            all_output_tokens.append(output_tokens if isinstance(output_tokens, int) else None)
             system_prompt = str(te.get("system_prompt", ""))[:200]
             prompt = str(te.get("prompt", ""))
             response = str(te.get("response", ""))
 
+            token_info = f"Input tokens: {input_tokens}  |  Output tokens: {output_tokens}"
             console.print(
                 Panel(
                     f"Agent: {agent}  |  Time: {ts}\n"
-                    f"Input chars: {input_chars}  |  Output chars: {output_chars}\n\n"
+                    f"Input chars: {input_chars}  |  Output chars: {output_chars}\n"
+                    f"{token_info}\n\n"
                     f"[bold]System prompt:[/bold] {system_prompt}\n\n"
                     f"[bold]Prompt:[/bold]\n{prompt}\n\n"
                     f"[bold]Response:[/bold]\n{response}",
@@ -109,6 +117,18 @@ def main() -> None:
                     border_style="green",
                 )
             )
+
+        if all(t is not None for t in all_input_tokens) and all(
+            t is not None for t in all_output_tokens
+        ):
+            total_in = sum(t for t in all_input_tokens if t is not None)
+            total_out = sum(t for t in all_output_tokens if t is not None)
+            console.print(
+                f"Total: {len(trace_events)} LLM calls  |  "
+                f"{total_in} input tokens  |  {total_out} output tokens"
+            )
+        else:
+            console.print("Token counts unavailable for one or more calls.")
     else:
         console.print(
             "No LLM trace events. Re-run with "

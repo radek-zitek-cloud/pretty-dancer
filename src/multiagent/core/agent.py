@@ -95,6 +95,15 @@ class LLMAgent:
             output = str(response.content)
             self._log.debug("llm_call_complete", output_chars=len(output))
 
+            usage = response.usage_metadata or {}
+            self._log.debug(
+                "llm_usage",
+                input_tokens=usage.get("input_tokens"),
+                output_tokens=usage.get("output_tokens"),
+                total_tokens=usage.get("total_tokens"),
+                history_length=len(state["messages"]),
+            )
+
             if self._settings.log_trace_llm:
                 self._log.info(
                     "llm_trace",
@@ -102,6 +111,8 @@ class LLMAgent:
                     system_prompt=self._system_prompt,
                     response=output,
                     history_length=len(state["messages"]),
+                    input_tokens=usage.get("input_tokens"),
+                    output_tokens=usage.get("output_tokens"),
                     output_chars=len(output),
                 )
 

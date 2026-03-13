@@ -4,8 +4,8 @@
 #
 # WARNING: no termination condition. Each exchange makes two real LLM calls.
 
-[agents.progressive]
-next_agent = "conservative"
+[agents.alfa]
+next_agent = "beta"
 
-[agents.conservative]
-next_agent = "progressive"
+[agents.beta]
+next_agent = "alfa"

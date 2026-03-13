@@ -69,6 +69,10 @@ db-clear:
 thread thread_id:
     uv run python scripts/show_thread.py {{thread_id}}
 
+# Browse all conversation threads interactively
+threads:
+    uv run python scripts/browse_threads.py
+
 # Show a summary of a single run log file
 run-summary log_file:
     uv run python scripts/show_run.py {{log_file}}

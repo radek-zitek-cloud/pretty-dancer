@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid as uuid_module
 
 import typer
 
@@ -15,6 +16,11 @@ from multiagent.transport.base import Message
 def send_command(
     agent_name: str = typer.Argument(..., help="Name of the agent to send to."),
     body: str = typer.Argument(..., help="Message body text."),
+    thread_id: str = typer.Option(
+        "",
+        "--thread-id", "-t",
+        help="Existing thread UUID to continue. Omit to start a new thread.",
+    ),
 ) -> None:
     """Inject a message into the transport addressed to a named agent.
 
@@ -24,6 +30,7 @@ def send_command(
     Args:
         agent_name: The target agent name as declared in agents.toml.
         body: The message body to deliver.
+        thread_id: Optional existing thread UUID to continue.
     """
     settings = load_settings()
     configs = load_agents_config(settings.agents_config_path)
@@ -34,8 +41,25 @@ def send_command(
             f"Available: {', '.join(sorted(configs.keys()))}"
         )
 
+    resolved_thread_id: str | None = None
+
+    if thread_id:
+        try:
+            uuid_module.UUID(thread_id)
+            resolved_thread_id = thread_id
+        except ValueError:
+            raise typer.BadParameter(
+                f"thread-id must be a valid UUID: {thread_id!r}",
+                param_hint="--thread-id",
+            ) from None
+
     transport = create_transport(settings)
-    message = Message(from_agent="human", to_agent=agent_name, body=body)
+    message = Message(
+        from_agent="human",
+        to_agent=agent_name,
+        body=body,
+        **({"thread_id": resolved_thread_id} if resolved_thread_id else {}),
+    )
 
     asyncio.run(transport.send(message))
     typer.echo(f"Sent to {agent_name}. Thread: {message.thread_id}")
