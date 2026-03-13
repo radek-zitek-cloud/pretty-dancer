@@ -15,6 +15,7 @@ from multiagent.transport.sqlite import SQLiteTransport
 async def transport():
     settings = Settings(
         greeting_secret="test-secret",  # type: ignore[call-arg]
+        openrouter_api_key="test-key-not-real",  # type: ignore[call-arg]
         transport_backend="sqlite",  # type: ignore[call-arg]
         sqlite_db_path=":memory:",  # type: ignore[call-arg]
         sqlite_poll_interval_seconds=1.0,  # type: ignore[call-arg]

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 
 if TYPE_CHECKING:
+    from pytest_mock import MockerFixture
+
     from multiagent.config.settings import Settings
     from multiagent.transport.base import Message
     from multiagent.transport.sqlite import SQLiteTransport
@@ -31,6 +35,8 @@ def test_settings() -> Settings:
         transport_backend="sqlite",  # type: ignore[call-arg]
         sqlite_db_path=":memory:",  # type: ignore[call-arg]
         sqlite_poll_interval_seconds=1.0,  # type: ignore[call-arg]
+        openrouter_api_key="test-key-not-real",  # type: ignore[call-arg]
+        prompts_dir=Path("tests/fixtures/prompts"),  # type: ignore[call-arg]
     )
 
 
@@ -63,3 +69,28 @@ def sample_message() -> Message:
         body="What is quantum entanglement?",
         subject="research",
     )
+
+
+@pytest.fixture
+def mock_llm_response() -> str:
+    return "Mocked LLM response for testing."
+
+
+@pytest.fixture
+def mock_llm(mocker: MockerFixture, mock_llm_response: str) -> AsyncMock:
+    """Mock ChatOpenAI.ainvoke to return a deterministic response.
+
+    Intercepts at the LangChain level so the full LangGraph graph
+    executes — only the actual HTTP call is replaced.
+
+    The mock returns an object with a .content attribute, matching
+    the real ChatOpenAI response structure.
+    """
+    mock = AsyncMock(
+        return_value=type("AIMessage", (), {"content": mock_llm_response})()
+    )
+    mocker.patch(
+        "langchain_openai.ChatOpenAI.ainvoke",
+        side_effect=mock,
+    )
+    return mock
