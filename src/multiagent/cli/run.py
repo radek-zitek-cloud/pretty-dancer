@@ -18,6 +18,12 @@ from multiagent.transport import create_transport
 
 def run_command(
     agent_name: str = typer.Argument(..., help="Name of the agent to run."),
+    experiment: str = typer.Option(
+        "",
+        "--experiment",
+        "-e",
+        help="Experiment label included in run log filenames.",
+    ),
 ) -> None:
     """Start a named agent and poll for messages indefinitely.
 
@@ -26,10 +32,16 @@ def run_command(
 
     Args:
         agent_name: The agent name as declared in agents.toml.
+        experiment: Optional experiment label for log filenames.
     """
     settings = load_settings()
-    configure_logging(level=settings.log_level, fmt=settings.log_format)
+    human_log, json_log = configure_logging(settings, experiment=experiment)
     log = structlog.get_logger(__name__)
+
+    if human_log:
+        typer.echo(f"Human log : {human_log}")
+    if json_log:
+        typer.echo(f"JSON log  : {json_log}")
 
     configs = load_agents_config(settings.agents_config_path)
     if agent_name not in configs:
