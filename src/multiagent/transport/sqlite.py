@@ -222,6 +222,26 @@ class SQLiteTransport(Transport):
         rows = await cursor.fetchall()
         return [row["to_agent"] for row in rows]
 
+    async def get_thread(self, thread_id: str) -> list[Message]:
+        """Return all messages belonging to a thread, ordered by created_at.
+
+        This method is for test inspection and debugging only. It is not part
+        of the Transport ABC and must not be called from agent or runner code.
+
+        Args:
+            thread_id: The UUID identifying the conversation thread.
+
+        Returns:
+            List of Message objects in chronological order.
+        """
+        conn = await self._get_connection()
+        cursor = await conn.execute(
+            "SELECT * FROM messages WHERE thread_id = ? ORDER BY created_at ASC",
+            (thread_id,),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_message(row) for row in rows]
+
     async def close(self) -> None:
         """Release the database connection. Idempotent."""
         if self._conn is not None:

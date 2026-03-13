@@ -29,6 +29,7 @@ def mock_transport() -> AsyncMock:
 @pytest.fixture
 def sample_msg() -> Message:
     return Message(
+        id=1,
         from_agent="human",
         to_agent="researcher",
         body="What is quantum entanglement?",

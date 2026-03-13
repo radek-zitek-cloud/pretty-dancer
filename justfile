@@ -36,8 +36,11 @@ test-all:
     uv run pytest tests/ -v
 
 # Running
-run:
-    uv run multiagent
+run agent:
+    uv run multiagent run {{agent}}
+
+send agent body:
+    uv run multiagent send {{agent}} "{{body}}"
 
 # Maintenance
 clean:

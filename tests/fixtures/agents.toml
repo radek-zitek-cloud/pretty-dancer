@@ -1,0 +1,5 @@
+[agents.researcher]
+next_agent = "critic"
+
+[agents.critic]
+# no next_agent — terminal agent

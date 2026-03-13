@@ -74,6 +74,13 @@ class Settings(BaseSettings):
         "Each agent loads {prompts_dir}/{agent_name}.md at construction.",
     )
 
+    # Agent wiring
+    agents_config_path: Path = Field(
+        Path("agents.toml"),
+        description="Path to the agents configuration file. "
+        "Declares all agents and their next_agent routing.",
+    )
+
     # Hello World test configuration
     greeting_message: str = Field(
         "Hello from multiagent",

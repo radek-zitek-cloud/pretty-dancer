@@ -1,70 +1,35 @@
-"""Main entry point for the multi-agent system.
+"""CLI entry point for the multiagent system.
 
-Provides the synchronous main() wrapper and async _async_main() function
-that implements the application lifecycle: load config, configure logging,
-log startup, print identity, print config values, log shutdown, exit.
+Commands:
+    run  — Start a named agent and poll for messages.
+    send — Inject a message into the transport for a named agent.
 """
 
 from __future__ import annotations
 
-import asyncio
 import sys
 
-import structlog
+import typer
 
-from multiagent import __version__
-from multiagent.config import load_settings
-from multiagent.constants import APP_NAME
-from multiagent.exceptions import InvalidConfigurationError, MultiAgentError
-from multiagent.logging import configure_logging
+from multiagent.cli.run import run_command
+from multiagent.cli.send import send_command
 
+app = typer.Typer(
+    name="multiagent",
+    help="Multi-agent LLM system.",
+    no_args_is_help=True,
+    add_completion=False,
+)
 
-async def _async_main() -> None:
-    """Run the application lifecycle.
-
-    Steps:
-        1. Load configuration
-        2. Configure logging
-        3. Log startup
-        4. Print identity line
-        5. Print and log configuration values
-        6. Log shutdown
-        7. Exit with code 0
-    """
-    settings = load_settings()
-
-    configure_logging(level=settings.log_level, fmt=settings.log_format)
-
-    log = structlog.get_logger(__name__)
-
-    await log.ainfo("startup", app=APP_NAME, version=__version__, env=settings.app_env)
-
-    print(f"{APP_NAME} v{__version__}")
-    print(f"Greeting message : {settings.greeting_message}")
-    print(f"Greeting secret  : {settings.greeting_secret}")
-
-    await log.ainfo("config_value", key="greeting_message", value=settings.greeting_message)
-    await log.ainfo("config_value", key="greeting_secret", value=settings.greeting_secret)
-
-    await log.ainfo("shutdown", reason="completed")
+app.command(name="run")(run_command)
+app.command(name="send")(send_command)
 
 
 def main() -> None:
-    """Synchronous entry point for the multiagent CLI."""
+    """Entry point called by ``[project.scripts]`` in pyproject.toml."""
     if sys.platform == "win32":
+        import asyncio
+
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    try:
-        asyncio.run(_async_main())
-    except InvalidConfigurationError as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
-        sys.exit(1)
-    except MultiAgentError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(1)
-    except KeyboardInterrupt:
-        print("\nInterrupted.", file=sys.stderr)
-        sys.exit(130)
-    except Exception as exc:  # intentional broad catch at boundary
-        print(f"Unexpected error: {exc}", file=sys.stderr)
-        sys.exit(1)
+    app()

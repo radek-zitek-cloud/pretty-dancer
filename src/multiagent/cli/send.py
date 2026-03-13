@@ -1,0 +1,41 @@
+"""Implementation of the ``multiagent send`` command."""
+
+from __future__ import annotations
+
+import asyncio
+
+import typer
+
+from multiagent.config import load_settings
+from multiagent.config.agents import load_agents_config
+from multiagent.transport import create_transport
+from multiagent.transport.base import Message
+
+
+def send_command(
+    agent_name: str = typer.Argument(..., help="Name of the agent to send to."),
+    body: str = typer.Argument(..., help="Message body text."),
+) -> None:
+    """Inject a message into the transport addressed to a named agent.
+
+    Creates a new message thread and delivers the message body to the
+    named agent's inbox. Prints the assigned thread_id on success.
+
+    Args:
+        agent_name: The target agent name as declared in agents.toml.
+        body: The message body to deliver.
+    """
+    settings = load_settings()
+    configs = load_agents_config(settings.agents_config_path)
+
+    if agent_name not in configs:
+        raise typer.BadParameter(
+            f"Agent '{agent_name}' not found in {settings.agents_config_path}. "
+            f"Available: {', '.join(sorted(configs.keys()))}"
+        )
+
+    transport = create_transport(settings)
+    message = Message(from_agent="human", to_agent=agent_name, body=body)
+
+    asyncio.run(transport.send(message))
+    typer.echo(f"Sent to {agent_name}. Thread: {message.thread_id}")
