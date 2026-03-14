@@ -57,6 +57,10 @@ chat agent thread_id="":
 start experiment="":
     uv run multiagent start {{if experiment != "" { "--experiment " + experiment } else { "" }}}
 
+# Launch the platform monitor TUI
+monitor experiment="" thread_id="":
+    uv run multiagent monitor {{if experiment != "" { "--experiment " + experiment } else { "" }}} {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}}
+
 # Request graceful shutdown of running agents (all or by name)
 stop agent="":
     uv run multiagent stop {{agent}}
