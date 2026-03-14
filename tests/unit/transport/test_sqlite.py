@@ -213,6 +213,19 @@ class TestSQLiteTransportKnownAgents:
         assert result == ["alice", "bob", "charlie"]
 
 
+class TestSQLiteTransportHumanRecipient:
+    async def test_human_is_valid_recipient(
+        self, transport: SQLiteTransport
+    ) -> None:
+        """Messages addressed to 'human' can be sent and received."""
+        await transport.send(_msg(from_agent="architect", to_agent="human", body="reply"))
+        result = await transport.receive("human")
+        assert result is not None
+        assert result.from_agent == "architect"
+        assert result.to_agent == "human"
+        assert result.body == "reply"
+
+
 class TestSQLiteTransportClose:
     async def test_close_is_idempotent(
         self, transport: SQLiteTransport

@@ -20,15 +20,23 @@ from rich.table import Table
 
 THREAD_SUMMARY_QUERY = """\
 SELECT
-    thread_id,
+    m.thread_id,
     COUNT(*)                                       AS message_count,
-    SUM(processed_at IS NOT NULL)                  AS processed_count,
-    MIN(created_at)                                AS started_at,
-    MAX(created_at)                                AS last_at,
-    MIN(body)                                      AS preview
-FROM messages
-GROUP BY thread_id
-ORDER BY MAX(created_at) DESC
+    SUM(m.processed_at IS NOT NULL)                AS processed_count,
+    MIN(m.created_at)                              AS started_at,
+    MAX(m.created_at)                              AS last_at,
+    MIN(m.body)                                    AS preview,
+    (
+        SELECT GROUP_CONCAT(DISTINCT participant)
+        FROM (
+            SELECT from_agent AS participant FROM messages WHERE thread_id = m.thread_id
+            UNION
+            SELECT to_agent   AS participant FROM messages WHERE thread_id = m.thread_id
+        )
+    ) AS participants
+FROM messages m
+GROUP BY m.thread_id
+ORDER BY MAX(m.created_at) DESC
 """
 
 COST_PER_THREAD_QUERY = """\
@@ -103,6 +111,7 @@ def _display_table(
     table = Table(title="Conversation Threads")
     table.add_column("#", justify="right", style="bold")
     table.add_column("Thread ID")
+    table.add_column("Participants")
     table.add_column("Messages", justify="right")
     table.add_column("Processed", justify="right")
     table.add_column("Cost", justify="right")
@@ -114,9 +123,11 @@ def _display_table(
         thread_id = str(row["thread_id"])
         cost = cost_lookup.get(thread_id)
         cost_str = f"${cost:.4f}" if cost is not None else "\u2014"
+        participants = str(row["participants"]) if row["participants"] else ""
         table.add_row(
             str(i),
             thread_id[:8],
+            participants,
             str(row["message_count"]),
             str(row["processed_count"]),
             cost_str,

@@ -75,3 +75,30 @@ class TestSendThreadId:
         )
         assert result.exit_code == 0
         assert f"Sent to progressive. Thread: {existing_id}" in result.output
+
+
+class TestSendFromAgent:
+    def test_from_agent_is_human(
+        self, cli_runner: typer.testing.CliRunner
+    ) -> None:
+        """Messages sent via the send command must have from_agent='human'."""
+        mock_transport = AsyncMock()
+        mock_transport.send = AsyncMock()
+
+        with (
+            patch("multiagent.cli.send.load_settings") as mock_settings,
+            patch("multiagent.cli.send.load_agents_config") as mock_configs,
+            patch(
+                "multiagent.cli.send.create_transport",
+                return_value=mock_transport,
+            ),
+        ):
+            mock_settings.return_value.agents_config_path = "agents.toml"
+            mock_configs.return_value = {"progressive": {}}
+
+            result = cli_runner.invoke(app, ["send", "progressive", "Hello"])
+            assert result.exit_code == 0
+
+            mock_transport.send.assert_called_once()
+            sent_message = mock_transport.send.call_args[0][0]
+            assert sent_message.from_agent == "human"

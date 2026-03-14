@@ -39,6 +39,7 @@ def test_settings() -> Settings:
         transport_backend="sqlite",  # type: ignore[call-arg]
         sqlite_db_path=":memory:",  # type: ignore[call-arg]
         sqlite_poll_interval_seconds=1.0,  # type: ignore[call-arg]
+        chat_reply_timeout_seconds=5.0,  # type: ignore[call-arg]
         openrouter_api_key="test-key-not-real",  # type: ignore[call-arg]
         prompts_dir=Path("tests/fixtures/prompts"),  # type: ignore[call-arg]
         agents_config_path=Path("tests/fixtures/agents.toml"),  # type: ignore[call-arg]

@@ -45,6 +45,14 @@ run agent experiment="":
 send agent body:
     uv run multiagent send {{agent}} "{{body}}"
 
+# Listen for messages addressed to human
+listen thread_id="":
+    uv run multiagent listen {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}}
+
+# Interactive chat session with an agent
+chat agent thread_id="":
+    uv run multiagent chat {{agent}} {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}}
+
 # Start all agents defined in agents.toml concurrently
 start experiment="":
     uv run multiagent start {{if experiment != "" { "--experiment " + experiment } else { "" }}}
