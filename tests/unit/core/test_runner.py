@@ -26,6 +26,8 @@ def mock_transport() -> AsyncMock:
     transport.receive = AsyncMock(return_value=None)
     transport.send = AsyncMock()
     transport.ack = AsyncMock()
+    transport.thread_messages_tail = AsyncMock(return_value=[])
+    transport.thread_message_count = AsyncMock(return_value=0)
     return transport
 
 
@@ -284,3 +286,184 @@ class TestAgentRunnerRunLoop:
                 await runner.run_loop()
         # Verify it polled at least twice (didn't exit early)
         assert call_count == 2
+
+
+class TestLoopDetection:
+    async def test_loop_detected_when_threshold_consecutive_self_sends(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        sample_msg: Message,
+    ) -> None:
+        """N consecutive self-sends → dispatch suppressed."""
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings,
+            next_agent="researcher",
+        )
+        mock_transport.receive.return_value = sample_msg
+        mock_transport.thread_messages_tail.return_value = [
+            ("researcher", "researcher"),
+            ("researcher", "researcher"),
+            ("researcher", "researcher"),
+        ]
+        await runner.run_once()
+        mock_transport.send.assert_not_called()
+
+    async def test_loop_not_detected_below_threshold(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        sample_msg: Message,
+    ) -> None:
+        """N-1 self-sends → dispatch proceeds."""
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings,
+            next_agent="researcher",
+        )
+        mock_transport.receive.return_value = sample_msg
+        mock_transport.thread_messages_tail.return_value = [
+            ("researcher", "researcher"),
+            ("researcher", "researcher"),
+        ]
+        await runner.run_once()
+        mock_transport.send.assert_called_once()
+
+    async def test_loop_not_detected_when_recipient_differs(
+        self,
+        runner: AgentRunner,
+        mock_transport: AsyncMock,
+        sample_msg: Message,
+    ) -> None:
+        """Different recipient → no query, dispatch proceeds."""
+        mock_transport.receive.return_value = sample_msg
+        await runner.run_once()
+        mock_transport.thread_messages_tail.assert_not_called()
+        mock_transport.send.assert_called_once()
+
+    async def test_loop_not_detected_when_disabled(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        sample_msg: Message,
+    ) -> None:
+        """threshold=0 → no detection regardless of messages."""
+        test_settings.agent_loop_detection_threshold = 0
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings,
+            next_agent="researcher",
+        )
+        mock_transport.receive.return_value = sample_msg
+        mock_transport.thread_messages_tail.return_value = [
+            ("researcher", "researcher"),
+            ("researcher", "researcher"),
+            ("researcher", "researcher"),
+        ]
+        await runner.run_once()
+        mock_transport.thread_messages_tail.assert_not_called()
+        mock_transport.send.assert_called_once()
+
+    async def test_loop_detection_resets_after_non_self_send(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        sample_msg: Message,
+    ) -> None:
+        """Streak broken by a non-self-send → no loop detected."""
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings,
+            next_agent="researcher",
+        )
+        mock_transport.receive.return_value = sample_msg
+        # Most recent 3: one from another agent breaks the streak
+        mock_transport.thread_messages_tail.return_value = [
+            ("researcher", "researcher"),
+            ("human", "researcher"),
+            ("researcher", "researcher"),
+        ]
+        await runner.run_once()
+        mock_transport.send.assert_called_once()
+
+    async def test_routing_loop_detected_event_logged(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        sample_msg: Message,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Loop detection logs WARNING and suppresses dispatch."""
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings,
+            next_agent="researcher",
+        )
+        mock_transport.receive.return_value = sample_msg
+        mock_transport.thread_messages_tail.return_value = [
+            ("researcher", "researcher"),
+            ("researcher", "researcher"),
+            ("researcher", "researcher"),
+        ]
+        result = await runner.run_once()
+        assert result is True
+        mock_transport.send.assert_not_called()
+        # Verify the warning was logged (captured by structlog to stderr/stdout)
+        captured = capsys.readouterr()
+        assert "routing_loop_detected" in captured.out
+
+
+class TestMaxMessages:
+    async def test_dispatch_suppressed_when_max_reached(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        sample_msg: Message,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """thread count >= max → dispatch suppressed + WARNING logged."""
+        test_settings.agent_max_messages_per_thread = 5
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings,
+            next_agent="critic",
+        )
+        mock_transport.receive.return_value = sample_msg
+        mock_transport.thread_message_count.return_value = 5
+        result = await runner.run_once()
+        assert result is True
+        mock_transport.send.assert_not_called()
+        captured = capsys.readouterr()
+        assert "max_messages_reached" in captured.out
+
+    async def test_dispatch_proceeds_below_max(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        sample_msg: Message,
+    ) -> None:
+        """thread count < max → normal dispatch."""
+        test_settings.agent_max_messages_per_thread = 5
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings,
+            next_agent="critic",
+        )
+        mock_transport.receive.return_value = sample_msg
+        mock_transport.thread_message_count.return_value = 4
+        await runner.run_once()
+        mock_transport.send.assert_called_once()
+
+    async def test_max_messages_disabled_when_zero(
+        self,
+        runner: AgentRunner,
+        mock_transport: AsyncMock,
+        sample_msg: Message,
+    ) -> None:
+        """max=0 → no suppression regardless of count."""
+        mock_transport.receive.return_value = sample_msg
+        mock_transport.thread_message_count.return_value = 1000
+        await runner.run_once()
+        mock_transport.thread_message_count.assert_not_called()
+        mock_transport.send.assert_called_once()
