@@ -161,8 +161,12 @@ class ThreadsPanel(Widget):
                 break
 
 
-class ThreadPanel(Widget):
-    """Displays the message chain for the selected thread."""
+class ThreadPanel(Widget, can_focus=True):
+    """Displays the message chain for the selected thread.
+
+    Focus this panel (click or tab) then use j/k to move between
+    messages and Enter to expand/collapse.
+    """
 
     DEFAULT_CSS = """
     ThreadPanel {
@@ -170,10 +174,21 @@ class ThreadPanel(Widget):
         height: 100%;
         padding: 0 1;
     }
+    ThreadPanel:focus {
+        border: solid $accent;
+    }
     ThreadPanel #thread-scroll {
         height: 100%;
     }
     """
+
+    BINDINGS = [  # noqa: RUF012  # type: ignore[assignment]
+        Binding("j", "cursor_down", "Msg ↓", show=False),
+        Binding("k", "cursor_up", "Msg ↑", show=False),
+        Binding("down", "cursor_down", "Msg ↓", show=False),
+        Binding("up", "cursor_up", "Msg ↑", show=False),
+        Binding("enter", "toggle_selected", "Toggle", show=False),
+    ]
 
     def __init__(self) -> None:
         super().__init__()
@@ -181,6 +196,7 @@ class ThreadPanel(Widget):
         self._last_count = 0
         self._messages: list[dict[str, Any]] = []
         self._expanded: set[int] = set()
+        self._cursor: int | None = None
         self.border_title = "Thread"
 
     def compose(self) -> ComposeResult:
@@ -223,7 +239,11 @@ class ThreadPanel(Widget):
             unprocessed = m.get("processed_at") is None
             dot = " [yellow]●[/]" if unprocessed else ""
 
+            # Cursor marker
+            cursor = "▶ " if i == self._cursor else "  "
+
             header = (
+                f"{cursor}"
                 f"[bold]{self._esc(from_a):<10}[/]"
                 f" → "
                 f"{self._esc(to_a):<10}"
@@ -234,7 +254,7 @@ class ThreadPanel(Widget):
             if i in self._expanded:
                 line = (
                     f"{header}  [dim]{ts_str}[/]{dot}"
-                    f" [dim]▾[/]\n{self._esc(body)}"
+                    f" [dim]▾[/]\n  {self._esc(body)}"
                 )
             else:
                 truncated = body.replace("\n", " ")
@@ -259,6 +279,8 @@ class ThreadPanel(Widget):
         """Update the message list and re-render."""
         new_count = len(messages)
         self._messages = messages
+        if self._cursor is not None and self._cursor >= new_count:
+            self._cursor = new_count - 1 if new_count else None
         self._render_thread()
 
         if new_count > self._last_count and self._auto_scroll:
@@ -268,6 +290,31 @@ class ThreadPanel(Widget):
             except Exception:
                 pass
         self._last_count = new_count
+
+    def action_cursor_down(self) -> None:
+        """Move cursor to the next message."""
+        if not self._messages:
+            return
+        if self._cursor is None:
+            self._cursor = 0
+        elif self._cursor < len(self._messages) - 1:
+            self._cursor += 1
+        self._render_thread()
+
+    def action_cursor_up(self) -> None:
+        """Move cursor to the previous message."""
+        if not self._messages:
+            return
+        if self._cursor is None:
+            self._cursor = len(self._messages) - 1
+        elif self._cursor > 0:
+            self._cursor -= 1
+        self._render_thread()
+
+    def action_toggle_selected(self) -> None:
+        """Toggle expand/collapse on the cursor message."""
+        if self._cursor is not None:
+            self.toggle_message(self._cursor)
 
     def toggle_message(self, index: int) -> None:
         """Expand or collapse a message by index."""
