@@ -169,12 +169,14 @@ class MessageRow(Static):
         height: auto;
         padding: 0;
         margin: 0;
+        color: $text;
+        background: $surface;
     }
     MessageRow:hover {
-        background: $surface-lighten-1;
+        background: $panel;
     }
     MessageRow.expanded {
-        background: $surface-lighten-1;
+        background: $panel;
         padding: 0 0 1 0;
     }
     """
