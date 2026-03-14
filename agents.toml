@@ -5,6 +5,7 @@
 
 [agents.supervisor]
 router = "research_supervisor"
+tools = ["filesystem"]
 
 [agents.fundamentals]
 next_agent = "supervisor"
