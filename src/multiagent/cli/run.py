@@ -13,8 +13,10 @@ from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
 from multiagent.core.agent import LLMAgent
 from multiagent.core.costs import CostLedger
+from multiagent.core.routing import build_router
 from multiagent.core.runner import AgentRunner
 from multiagent.core.shutdown import ShutdownMonitor
+from multiagent.exceptions import ConfigurationError
 from multiagent.logging import configure_logging
 from multiagent.transport import create_transport
 
@@ -35,14 +37,24 @@ async def _run(
     if json_log:
         typer.echo(f"JSON log  : {json_log}")
 
-    configs = load_agents_config(settings.agents_config_path)
-    if agent_name not in configs:
+    agents_config = load_agents_config(settings.agents_config_path)
+    if agent_name not in agents_config.agents:
         raise typer.BadParameter(
             f"Agent '{agent_name}' not found in {settings.agents_config_path}. "
-            f"Available: {', '.join(sorted(configs.keys()))}"
+            f"Available: {', '.join(sorted(agents_config.agents.keys()))}"
         )
 
-    agent_config = configs[agent_name]
+    agent_config = agents_config.agents[agent_name]
+
+    router = None
+    if agent_config.router:
+        if agent_config.router not in agents_config.routers:
+            raise ConfigurationError(
+                f"Agent '{agent_name}' references router '{agent_config.router}' "
+                f"which is not defined in [routers.*]"
+            )
+        router = build_router(agents_config.routers[agent_config.router], settings)
+
     transport = create_transport(settings)
     monitor = ShutdownMonitor(settings.sqlite_db_path.parent)
     monitor.clear(agent_name)
@@ -53,7 +65,9 @@ async def _run(
         str(settings.checkpointer_db_path)
     ) as checkpointer:
         async with CostLedger(settings.cost_db_path) as cost_ledger:
-            agent = LLMAgent(agent_name, settings, checkpointer, cost_ledger)
+            agent = LLMAgent(
+                agent_name, settings, checkpointer, cost_ledger, router=router
+            )
             runner = AgentRunner(
                 agent,
                 transport,

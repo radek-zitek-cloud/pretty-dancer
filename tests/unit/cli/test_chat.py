@@ -10,6 +10,7 @@ import pytest
 import typer.testing
 
 from multiagent.cli.main import app
+from multiagent.config.agents import AgentConfig, AgentsConfig
 
 
 @pytest.fixture
@@ -34,7 +35,13 @@ def _mock_chat_deps() -> Generator[dict[str, MagicMock | AsyncMock]]:  # pyright
         patch("multiagent.cli.chat.load_settings", return_value=mock_settings),
         patch(
             "multiagent.cli.chat.load_agents_config",
-            return_value={"progressive": {}, "conservative": {}},
+            return_value=AgentsConfig(
+                agents={
+                    "progressive": AgentConfig(name="progressive"),
+                    "conservative": AgentConfig(name="conservative"),
+                },
+                routers={},
+            ),
         ),
         patch("multiagent.cli.chat.create_transport", return_value=mock_transport),
         patch("multiagent.cli.chat.asyncio.run") as mock_run,
@@ -100,7 +107,10 @@ class TestChatCommand:
             ),
             patch(
                 "multiagent.cli.chat.load_agents_config",
-                return_value={"progressive": {}},
+                return_value=AgentsConfig(
+                    agents={"progressive": AgentConfig(name="progressive")},
+                    routers={},
+                ),
             ),
             patch(
                 "multiagent.cli.chat.create_transport",

@@ -13,8 +13,10 @@ from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
 from multiagent.core.agent import LLMAgent
 from multiagent.core.costs import CostLedger
+from multiagent.core.routing import build_router
 from multiagent.core.runner import AgentRunner
 from multiagent.core.shutdown import ShutdownMonitor
+from multiagent.exceptions import ConfigurationError
 from multiagent.logging import configure_logging
 from multiagent.transport import create_transport
 
@@ -34,13 +36,13 @@ async def _start(experiment: str) -> None:
     if json_log:
         typer.echo(f"JSON log  : {json_log}")
 
-    agent_configs = load_agents_config(settings.agents_config_path)
+    agents_config = load_agents_config(settings.agents_config_path)
 
-    if not agent_configs:
+    if not agents_config.agents:
         typer.echo("No agents configured — nothing to start.", err=True)
         return
 
-    log.info("cluster_starting", agents=list(agent_configs.keys()))
+    log.info("cluster_starting", agents=list(agents_config.agents.keys()))
 
     transport = create_transport(settings)
     monitor = ShutdownMonitor(settings.sqlite_db_path.parent)
@@ -54,8 +56,23 @@ async def _start(experiment: str) -> None:
         async with CostLedger(settings.cost_db_path) as cost_ledger:
             try:
                 async with asyncio.TaskGroup() as tg:
-                    for name, config in agent_configs.items():
-                        agent = LLMAgent(name, settings, checkpointer, cost_ledger)
+                    for name, config in agents_config.agents.items():
+                        router = None
+                        if config.router:
+                            if config.router not in agents_config.routers:
+                                raise ConfigurationError(
+                                    f"Agent '{name}' references router "
+                                    f"'{config.router}' which is not defined "
+                                    f"in [routers.*]"
+                                )
+                            router = build_router(
+                                agents_config.routers[config.router], settings
+                            )
+
+                        agent = LLMAgent(
+                            name, settings, checkpointer, cost_ledger,
+                            router=router,
+                        )
                         runner = AgentRunner(
                             agent,
                             transport,
@@ -67,6 +84,7 @@ async def _start(experiment: str) -> None:
                             "agent_starting",
                             agent=name,
                             next_agent=config.next_agent,
+                            router=config.router,
                         )
                         tg.create_task(runner.run_loop(), name=name)
             except* asyncio.CancelledError:
@@ -79,7 +97,7 @@ async def _start(experiment: str) -> None:
                 monitor.clear()
                 await transport.close()
 
-            log.info("cluster_stopped", agents=list(agent_configs.keys()))
+            log.info("cluster_stopped", agents=list(agents_config.agents.keys()))
 
 
 def start_command(

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from multiagent.config.settings import Settings
+from multiagent.core.agent import RunResult
 from multiagent.core.runner import AgentRunner
 from multiagent.core.shutdown import ShutdownMonitor
 from multiagent.exceptions import AgentLLMError
@@ -15,7 +16,7 @@ from multiagent.transport.base import Message
 def mock_agent() -> AsyncMock:
     agent = AsyncMock()
     agent.name = "researcher"
-    agent.run = AsyncMock(return_value="LLM response text")
+    agent.run = AsyncMock(return_value=RunResult(response="LLM response text"))
     return agent
 
 
@@ -143,7 +144,7 @@ class TestAgentRunnerRetry:
         mock_agent.run.side_effect = [
             AgentLLMError("fail 1"),
             AgentLLMError("fail 2"),
-            "success",
+            RunResult(response="success"),
         ]
         with patch("asyncio.sleep", new_callable=AsyncMock):
             result = await runner.run_once()
@@ -157,7 +158,7 @@ class TestAgentRunnerRetry:
         sample_msg: Message,
     ) -> None:
         mock_transport.receive.return_value = sample_msg
-        mock_agent.run.side_effect = [AgentLLMError("transient"), "recovered"]
+        mock_agent.run.side_effect = [AgentLLMError("transient"), RunResult(response="recovered")]
         with patch("asyncio.sleep", new_callable=AsyncMock):
             result = await runner.run_once()
         assert result is True

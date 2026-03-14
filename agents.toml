@@ -1,9 +1,13 @@
 [agents.editor]
-next_agent = "human"        # editor always replies to human during dialogue
-                            # will become dynamic routing in Task 011b
+router = "editorial_gate"       # dynamic routing — keyword match on output
 
 [agents.writer]
 next_agent = "linguist"
 
 [agents.linguist]
-next_agent = "human"        # finished article goes back to human
+next_agent = "human"            # finished article goes back to human
+
+[routers.editorial_gate]
+type = "keyword"
+routes.writer = ["WRITER BRIEF", "END BRIEF"]
+default = "human"

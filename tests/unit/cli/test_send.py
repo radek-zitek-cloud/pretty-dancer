@@ -8,6 +8,7 @@ import pytest
 import typer.testing
 
 from multiagent.cli.main import app
+from multiagent.config.agents import AgentConfig, AgentsConfig
 
 
 @pytest.fixture
@@ -27,7 +28,13 @@ def _mock_send_deps() -> Generator[None]:  # pyright: ignore[reportUnusedFunctio
         patch("multiagent.cli.send.create_transport", return_value=mock_transport),
     ):
         mock_settings.return_value.agents_config_path = "agents.toml"
-        mock_configs.return_value = {"progressive": {}, "conservative": {}}
+        mock_configs.return_value = AgentsConfig(
+            agents={
+                "progressive": AgentConfig(name="progressive"),
+                "conservative": AgentConfig(name="conservative"),
+            },
+            routers={},
+        )
         yield
 
 
@@ -94,7 +101,10 @@ class TestSendFromAgent:
             ),
         ):
             mock_settings.return_value.agents_config_path = "agents.toml"
-            mock_configs.return_value = {"progressive": {}}
+            mock_configs.return_value = AgentsConfig(
+                agents={"progressive": AgentConfig(name="progressive")},
+                routers={},
+            )
 
             result = cli_runner.invoke(app, ["send", "progressive", "Hello"])
             assert result.exit_code == 0

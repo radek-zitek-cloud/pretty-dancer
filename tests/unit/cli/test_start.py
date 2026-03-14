@@ -3,16 +3,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from multiagent.config.agents import AgentConfig
+from multiagent.config.agents import AgentConfig, AgentsConfig
 
 
 @pytest.fixture
-def _mock_start_deps() -> Any:
+def _mock_start_deps(tmp_path: Path) -> Any:
     """Mock all external dependencies for start_command / _start."""
     mock_transport = AsyncMock()
 
@@ -26,6 +27,14 @@ def _mock_start_deps() -> Any:
         return_value=False
     )
 
+    # CostLedger as async context manager
+    mock_cost_ledger = AsyncMock()
+    mock_cost_ledger_cls = MagicMock()
+    mock_cost_ledger_cls.return_value.__aenter__ = AsyncMock(
+        return_value=mock_cost_ledger
+    )
+    mock_cost_ledger_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
     mock_runner_instance = MagicMock()
     mock_runner_instance.run_loop = AsyncMock()
 
@@ -37,6 +46,7 @@ def _mock_start_deps() -> Any:
             "multiagent.cli.start.create_transport", return_value=mock_transport
         ),
         patch("multiagent.cli.start.AsyncSqliteSaver", mock_saver_cls),
+        patch("multiagent.cli.start.CostLedger", mock_cost_ledger_cls),
         patch("multiagent.cli.start.LLMAgent"),
         patch(
             "multiagent.cli.start.AgentRunner",
@@ -44,12 +54,15 @@ def _mock_start_deps() -> Any:
         ) as mock_runner_cls,
     ):
         mock_settings.return_value.agents_config_path = "agents.toml"
-        mock_settings.return_value.checkpointer_db_path = MagicMock()
-        mock_settings.return_value.checkpointer_db_path.parent.mkdir = MagicMock()
-        mock_configs.return_value = {
-            "researcher": AgentConfig(name="researcher", next_agent="critic"),
-            "critic": AgentConfig(name="critic"),
-        }
+        mock_settings.return_value.checkpointer_db_path = tmp_path / "checkpoints.db"
+        mock_settings.return_value.sqlite_db_path = tmp_path / "agents.db"
+        mock_configs.return_value = AgentsConfig(
+            agents={
+                "researcher": AgentConfig(name="researcher", next_agent="critic"),
+                "critic": AgentConfig(name="critic"),
+            },
+            routers={},
+        )
         yield {
             "runner_cls": mock_runner_cls,
             "runner_instance": mock_runner_instance,
@@ -71,7 +84,9 @@ class TestStartCommand:
         # run_loop should be called once per agent (2 agents in fixture)
         assert runner_instance.run_loop.call_count == 2
 
-    def test_exits_cleanly_when_no_agents_configured(self) -> None:
+    def test_exits_cleanly_when_no_agents_configured(
+        self, tmp_path: Path
+    ) -> None:
         """No TaskGroup created when agents config is empty."""
         mock_checkpointer = AsyncMock()
         mock_saver_cls = MagicMock()
@@ -82,10 +97,20 @@ class TestStartCommand:
             return_value=False
         )
 
+        mock_cost_ledger = AsyncMock()
+        mock_cost_ledger_cls = MagicMock()
+        mock_cost_ledger_cls.return_value.__aenter__ = AsyncMock(
+            return_value=mock_cost_ledger
+        )
+        mock_cost_ledger_cls.return_value.__aexit__ = AsyncMock(
+            return_value=False
+        )
+
         with (
             patch("multiagent.cli.start.load_settings") as mock_settings,
             patch(
-                "multiagent.cli.start.load_agents_config", return_value={}
+                "multiagent.cli.start.load_agents_config",
+                return_value=AgentsConfig(agents={}, routers={})
             ),
             patch(
                 "multiagent.cli.start.configure_logging",
@@ -93,11 +118,12 @@ class TestStartCommand:
             ),
             patch("multiagent.cli.start.create_transport"),
             patch("multiagent.cli.start.AsyncSqliteSaver", mock_saver_cls),
+            patch("multiagent.cli.start.CostLedger", mock_cost_ledger_cls),
             patch("multiagent.cli.start.AgentRunner") as mock_runner_cls,
         ):
             mock_settings.return_value.agents_config_path = "agents.toml"
-            mock_settings.return_value.checkpointer_db_path = MagicMock()
-            mock_settings.return_value.checkpointer_db_path.parent.mkdir = MagicMock()
+            mock_settings.return_value.checkpointer_db_path = tmp_path / "checkpoints.db"
+            mock_settings.return_value.sqlite_db_path = tmp_path / "agents.db"
 
             from multiagent.cli.start import start_command
 
