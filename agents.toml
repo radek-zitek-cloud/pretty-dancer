@@ -8,9 +8,11 @@ router = "research_supervisor"
 
 [agents.fundamentals]
 next_agent = "supervisor"
+tools = ["exa"]
 
 [agents.risk]
 next_agent = "supervisor"
+tools = ["exa"]
 
 [agents.synthesis]
 next_agent = "supervisor"
