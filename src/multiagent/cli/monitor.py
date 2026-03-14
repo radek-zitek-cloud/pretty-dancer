@@ -239,8 +239,8 @@ class ThreadPanel(Widget, can_focus=True):
             unprocessed = m.get("processed_at") is None
             dot = " [yellow]●[/]" if unprocessed else ""
 
-            # Cursor marker
-            cursor = "▶ " if i == self._cursor else "  "
+            # Cursor marker — always visible so user knows which message is selected
+            cursor = "[bold yellow]▶[/] " if i == self._cursor else "  "
 
             header = (
                 f"{cursor}"
@@ -279,7 +279,9 @@ class ThreadPanel(Widget, can_focus=True):
         """Update the message list and re-render."""
         new_count = len(messages)
         self._messages = messages
-        if self._cursor is not None and self._cursor >= new_count:
+        if new_count > 0 and self._cursor is None:
+            self._cursor = 0
+        elif self._cursor is not None and self._cursor >= new_count:
             self._cursor = new_count - 1 if new_count else None
         self._render_thread()
 
@@ -440,6 +442,7 @@ class MonitorApp(App[None]):
         Binding("r", "refresh", "Refresh"),
         Binding("e", "expand_all", "Expand all"),
         Binding("c", "collapse_all", "Collapse all"),
+        Binding("f", "focus_thread", "Messages"),
         Binding("tab", "focus_next", "Next field", show=False),
     ]
 
@@ -701,6 +704,10 @@ class MonitorApp(App[None]):
     def action_collapse_all(self) -> None:
         """Collapse all messages in the thread panel."""
         self.query_one(ThreadPanel).collapse_all()
+
+    def action_focus_thread(self) -> None:
+        """Focus the thread panel for message navigation."""
+        self.query_one(ThreadPanel).focus()
 
     async def _refresh_header_cost(self) -> None:
         """Update the header subtitle with total cost."""
