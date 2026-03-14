@@ -415,6 +415,7 @@ class MonitorApp(App[None]):
         self._agents_conn: aiosqlite.Connection | None = None
         self._cost_conn: aiosqlite.Connection | None = None
         self._transport: Any = None
+        self._refreshing = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -473,6 +474,7 @@ class MonitorApp(App[None]):
 
     async def _refresh_all(self) -> None:
         """Poll all panels."""
+        self._refreshing = True
         try:
             await self._refresh_agents()
             await self._refresh_threads()
@@ -480,6 +482,8 @@ class MonitorApp(App[None]):
             await self._refresh_header_cost()
         except Exception:
             pass
+        finally:
+            self._refreshing = False
 
     async def _refresh_agents(self) -> None:
         """Query inbox counts and update agent panel."""
@@ -585,6 +589,8 @@ class MonitorApp(App[None]):
         self, event: OptionList.OptionHighlighted
     ) -> None:
         """When a thread is selected, load its messages and prefill send."""
+        if self._refreshing:
+            return
         await self._load_selected_thread()
         await self._prefill_send_panel()
 
