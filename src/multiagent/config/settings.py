@@ -149,6 +149,20 @@ class Settings(BaseSettings):
         "Created on first run — no manual setup required.",
     )
 
+    # Termination
+    agent_loop_detection_threshold: int = Field(
+        3,
+        ge=0,
+        description="Halt dispatch when the same agent sends to itself this many "
+        "consecutive times on a thread. 0 = disabled.",
+    )
+    agent_max_messages_per_thread: int = Field(
+        0,
+        ge=0,
+        description="Halt dispatch when thread message count reaches this value. "
+        "0 = unlimited.",
+    )
+
     # Hello World test configuration
     greeting_message: str = Field(
         "Hello from multiagent",

@@ -45,6 +45,8 @@ def test_settings() -> Settings:
         agents_config_path=Path("tests/fixtures/agents.toml"),  # type: ignore[call-arg]
         checkpointer_db_path=Path(":memory:"),  # type: ignore[call-arg]
         cost_db_path=Path(":memory:"),  # type: ignore[call-arg]
+        agent_loop_detection_threshold=3,  # type: ignore[call-arg]
+        agent_max_messages_per_thread=0,  # type: ignore[call-arg]
     )
 
 
