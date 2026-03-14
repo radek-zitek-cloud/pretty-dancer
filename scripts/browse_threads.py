@@ -94,6 +94,16 @@ def _display_table(console: Console, rows: list[sqlite3.Row]) -> None:
     console.print(table)
 
 
+def _fetch_rows(db_path: Path) -> list[sqlite3.Row]:
+    """Query the database and return thread summary rows."""
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(THREAD_SUMMARY_QUERY).fetchall()
+    finally:
+        conn.close()
+
+
 def main() -> None:
     """Entry point for browse_threads script."""
     db_path = _load_db_path()
@@ -102,16 +112,9 @@ def main() -> None:
         print(f"Database not found: {db_path}", file=sys.stderr)
         sys.exit(1)
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-
     console = Console()
 
-    try:
-        rows = conn.execute(THREAD_SUMMARY_QUERY).fetchall()
-    finally:
-        conn.close()
-
+    rows = _fetch_rows(db_path)
     if not rows:
         console.print("No threads found in database.")
         sys.exit(0)
@@ -120,12 +123,17 @@ def main() -> None:
 
     while True:
         try:
-            choice = input("Enter thread number (or q to quit): ").strip()
+            choice = input("Enter thread number (r=refresh, q=quit): ").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
         if not choice or choice.lower() == "q":
             break
+
+        if choice.lower() == "r":
+            rows = _fetch_rows(db_path)
+            _display_table(console, rows)
+            continue
 
         try:
             index = int(choice) - 1
@@ -141,7 +149,8 @@ def main() -> None:
             check=False,
         )
 
-        # Redisplay table after returning from show_thread
+        # Refresh data and redisplay table after returning from show_thread
+        rows = _fetch_rows(db_path)
         _display_table(console, rows)
 
 
