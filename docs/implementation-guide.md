@@ -1,9 +1,10 @@
 # Multi-Agent System — Implementation Guide
 
-**Version:** 1.0.0  
-**Status:** Authoritative — Claude Code must treat this document as the canonical reference  
-**Architect:** Claude (claude.ai) in collaboration with Radek Zítek  
-**Last Updated:** 2026-03-13
+**Version:** 2.0  
+**Status:** Approved  
+**Author:** Architecture (Claude.ai) + Radek Zítek  
+**Audited by:** Tom (implementer agent)  
+**Last Updated:** 2026-03-14
 
 ---
 
@@ -12,1897 +13,809 @@
 1. [Project Overview](#1-project-overview)
 2. [Technology Stack](#2-technology-stack)
 3. [Repository Structure](#3-repository-structure)
-4. [Environment and Tooling Setup](#4-environment-and-tooling-setup)
-5. [Configuration System](#5-configuration-system)
-6. [Logging Standards](#6-logging-standards)
-7. [Exception Hierarchy](#7-exception-hierarchy)
-8. [Architecture and Module Boundaries](#8-architecture-and-module-boundaries)
-9. [Coding Standards](#9-coding-standards)
-10. [Docstring Standard](#10-docstring-standard)
-11. [Testing Strategy](#11-testing-strategy)
-12. [Git Workflow](#12-git-workflow)
-13. [Task Runner](#13-task-runner)
-14. [Documentation Standards](#14-documentation-standards)
-15. [Cross-Platform Rules](#15-cross-platform-rules)
-16. [Dependency Reference](#16-dependency-reference)
+4. [Architecture Principles](#4-architecture-principles)
+5. [Module Dependency Rules](#5-module-dependency-rules)
+6. [Configuration Contract](#6-configuration-contract)
+7. [Observability Contract](#7-observability-contract)
+8. [Transport Contract](#8-transport-contract)
+9. [Agent Contract](#9-agent-contract)
+10. [Routing Contract](#10-routing-contract)
+11. [Exception Hierarchy](#11-exception-hierarchy)
+12. [Python Standards](#12-python-standards)
+13. [Testing Strategy](#13-testing-strategy)
+14. [Scripts and Inspection Tools](#14-scripts-and-inspection-tools)
+15. [Git Workflow](#15-git-workflow)
+16. [Task Runner Reference](#16-task-runner-reference)
+17. [Dependency Reference](#17-dependency-reference)
 
 ---
 
 ## 1. Project Overview
 
-### Purpose
+This system is a proof-of-concept for a multi-agent architecture where LLM-powered
+agents communicate via a message-passing infrastructure. The design is intentionally
+minimal and transport-agnostic: agents are pure input/output units; all I/O concerns
+live in swappable adapters.
 
-A proof-of-concept multi-agent system where LLM-powered agents communicate through a
-transport-agnostic messaging layer. The system demonstrates that agent logic is entirely
-independent of the communication medium — agents are interchangeable between terminal
-interaction and a persistent SQLite message bus without any modification to agent code.
+### Design Philosophy
 
-### Core Architectural Principles
+- **Segregation of concerns is non-negotiable.** Every module has a single, clearly
+  stated responsibility. The folder structure enforces this visually.
+- **Designed for organic growth.** Adding a new agent, transport, or tool must never
+  require modifying existing modules — only adding new ones.
+- **Transport agnosticism.** An agent must be completely unaware of whether it is
+  connected to a terminal, a SQLite database, a message broker, or a test harness.
+- **PoC first, framework second.** LangGraph is the foundation but the PoC validates
+  the architecture without unnecessary framework coupling.
 
-**Separation of Concerns** is the supreme constraint. Every module has exactly one
-responsibility. If a module's purpose cannot be stated in one sentence, it must be split.
+### What This System Is Not
 
-**Ports and Adapters (Hexagonal Architecture)** governs the relationship between agent
-logic and I/O. Agent cores are pure logic units. All I/O — transport, terminal, logging
-sinks, configuration sources — are adapters that plug into defined ports (abstract
-interfaces). The agent core never imports from adapter modules.
-
-**Open/Closed** — the system is open for extension, closed for modification. Adding a
-new agent, a new transport backend, or a new tool must require only adding new files,
-never modifying existing ones.
-
-**Async-First** — the entire codebase uses `async/await` natively. Synchronous wrappers
-are provided only at CLI entry points. This is a one-time architectural decision that
-is prohibitively expensive to reverse later.
-
-**Configuration over Code** — every value that could vary between environments lives in
-configuration. No magic strings or numbers in source code.
+- Not production infrastructure. Reliability, multi-machine scaling, and HA are
+  out of scope.
+- Not a framework. Do not design for hypothetical future consumers.
+- Not a chatbot. It is a message-passing pipeline where agents are processing nodes.
 
 ---
 
 ## 2. Technology Stack
 
-All technology choices are fixed for this project. Deviations require an Architecture
-Decision Record and explicit approval.
-
 | Concern | Choice | Rationale |
 |---|---|---|
-| Language | Python 3.12 (pinned) | `TypedDict` improvements, `tomllib` stdlib, best asyncio |
-| Package manager | `uv` | Fastest resolver, native venv, lockfile, cross-platform |
-| Agent framework | LangGraph | Native async, typed state, composable graphs |
-| LLM provider | OpenRouter.ai via `langchain-openai` | Unified gateway to all major models; OpenAI-compatible API |
-| Transport (PoC) | SQLite via stdlib `aiosqlite` | Serverless, persistent, inspectable, zero infra |
-| Transport (dev) | Terminal adapter | Interactive testing without infrastructure |
-| Configuration | `pydantic-settings` | Type-safe, validated, documented, layered env |
-| Logging | `structlog` | Structured output, context binding, dev/prod renderers |
-| Linter/Formatter | `ruff` | Replaces black + flake8 + isort, fastest, unified config |
-| Type checker | `pyright` | Strict mode, best LangGraph / Pydantic v2 support |
-| Test framework | `pytest` + `pytest-asyncio` | Async test support, fixtures, markers |
-| Test mocking | `pytest-mock` | LLM call interception in unit tests |
-| HTTP mocking | `respx` | Mock httpx-based OpenAI SDK calls |
-| CLI framework | `typer` + `click` | Type-annotated commands, automatic help, shell completion |
-| Task runner | `just` | Cross-platform, simple syntax, no shell dependency |
-| Pre-commit | `pre-commit` | Enforce ruff and pyright before every commit |
+| Language | Python 3.12 (pinned) | `tomllib` stdlib, `asyncio.TaskGroup`, `except*` syntax |
+| Package manager | `uv` | Fast, cross-platform, lockfile discipline |
+| Linter + formatter | `ruff` | Single tool replacing flake8 + isort + black |
+| Type checker | `pyright` strict | Best LangGraph/TypedDict support |
+| LLM framework | LangGraph (per agent) | Async-native, typed state, checkpointing |
+| LLM provider | OpenRouter | Via `langchain-openai` + `ChatOpenAI` |
+| Structured logging | `structlog` | Context binding, dual console/JSON output |
+| Configuration | `pydantic-settings` | Type-safe, validated, layered `.env` support |
+| Message persistence | SQLite (WAL mode) | Serverless, zero infrastructure, inspectable |
+| Checkpointing | `langgraph-checkpoint-sqlite` | Thread-aware LangGraph state persistence |
+| Testing | `pytest` + `pytest-asyncio` | Async test support, marker-based tier separation |
+| Task runner | `just` | Cross-platform, replaces make |
+| CLI | `typer` + `rich` | Typed CLI with rich terminal output |
 
-### Pinned Versions
+### Python Version Pinning
 
-Exact versions are recorded in `uv.lock` (auto-generated). The following are minimum
-acceptable versions at project inception:
-
-```toml
-# pyproject.toml [project.dependencies]
-python = ">=3.12,<3.13"
-langgraph = ">=0.2"
-langchain-openai = ">=0.1"
-openai = ">=1.0"
-pydantic-settings = ">=2.0"
-structlog = ">=24.0"
-aiosqlite = ">=0.20"
-typer = ">=0.12"
-click = ">=8.1"
-```
+Python 3.12 is pinned in `.python-version` (read by `uv`), `pyproject.toml`
+(`requires-python = ">=3.12"`), and `pyright` config (`pythonVersion = "3.12"`).
+All three must agree.
 
 ---
 
 ## 3. Repository Structure
 
-The folder structure enforces the architecture. A developer reading only the path of any
-file must be able to determine its responsibility without opening it.
+The folder structure is the architecture made visible.
 
 ```
-multiagent/                          # repository root
+multiagent/
 │
-├── .env.defaults                    # committed — documents all config keys, safe defaults
-├── .env                             # gitignored — local developer overrides
-├── .env.test                        # committed — test environment overrides
+├── .env.defaults              # committed — documents all config keys, safe defaults
+├── .env                       # gitignored — local developer overrides (secrets here)
+├── .env.test                  # committed — test environment overrides
 ├── .gitignore
+├── .gitattributes             # enforces LF line endings
 ├── .pre-commit-config.yaml
-├── agents.toml                      # agent wiring configuration — names, next_agent routing
-├── justfile                         # all runnable tasks
-├── pyproject.toml                   # package metadata, ruff, pyright, pytest config
-├── uv.lock                          # committed — reproducible dependency resolution
-├── README.md                        # project entry point
+├── .python-version            # pins Python 3.12 for uv
+├── agents.toml                # agent wiring and router configuration
+├── justfile                   # task runner definitions
+├── pyproject.toml
+├── uv.lock                    # committed lockfile
+├── README.md
 │
-├── docs/                            # all project documentation
-│   ├── adr/                         # Architecture Decision Records
-│   │   ├── 0001-python-312.md
-│   │   ├── 0002-uv-package-manager.md
-│   │   ├── 0003-async-first.md
-│   │   ├── 0004-sqlite-transport-poc.md
-│   │   └── 0005-langgraph-agent-internals.md
-│   ├── architecture.md              # system architecture narrative
-│   ├── getting-started.md           # developer onboarding
-│   └── transport-guide.md           # how to implement a new transport adapter
+├── docs/
+│   └── adr/
+│       └── README.md          # ADR index and template
 │
-├── src/                             # all application source code
-│   └── multiagent/                  # the package
+├── prompts/                   # system prompt files, one per agent
+│   ├── <agent_name>.md
+│   └── routers/               # LLM classifier router prompts
+│       └── <router_name>.md
+│
+├── scripts/                   # inspection and utility scripts (not CLI commands)
+│   ├── browse_threads.py
+│   ├── compare_runs.py
+│   ├── show_costs.py
+│   ├── show_run.py
+│   └── show_thread.py
+│
+├── src/
+│   └── multiagent/
+│       ├── __init__.py        # package version only
+│       ├── exceptions.py      # complete custom exception hierarchy
+│       ├── version.py         # SemVer utilities
 │       │
-│       ├── __init__.py              # package version only — no imports
-│       ├── exceptions.py            # complete exception hierarchy
-│       ├── constants.py             # true constants only (no config values)
+│       ├── config/
+│       │   ├── __init__.py    # exports: Settings, load_settings, AgentConfig,
+│       │   │                  #          load_agents_config
+│       │   ├── settings.py    # pydantic-settings Settings class
+│       │   └── agents.py      # AgentConfig, RouterConfig, AgentsConfig, loaders
 │       │
-│       ├── config/                  # configuration system
-│       │   ├── __init__.py          # exports Settings, get_settings, AgentConfig, load_agents_config
-│       │   ├── settings.py          # pydantic-settings Settings class
-│       │   └── agents.py            # AgentConfig dataclass + load_agents_config()
+│       ├── core/              # agent logic — zero I/O knowledge
+│       │   ├── __init__.py    # exports: LLMAgent, AgentRunner, CostLedger
+│       │   ├── agent.py       # LLMAgent: system prompt + LangGraph graph
+│       │   ├── costs.py       # CostLedger, CostEntry
+│       │   ├── routing.py     # KeywordRouter, LLMRouter, build_router
+│       │   ├── runner.py      # AgentRunner: connects agent to transport
+│       │   └── shutdown.py    # ShutdownMonitor: stop-file and signal handling
 │       │
-│       ├── core/                    # agent logic — NO transport, NO I/O imports
-│       │   ├── __init__.py
-│       │   ├── agent.py             # LLMAgent class
-│       │   ├── runner.py            # AgentRunner class
-│       │   └── state.py             # LangGraph state TypedDict definitions
+│       ├── transport/         # I/O adapters — zero agent logic
+│       │   ├── __init__.py    # exports: Transport, Message, create_transport
+│       │   ├── base.py        # Transport ABC + Message dataclass
+│       │   ├── sqlite.py      # SQLiteTransport
+│       │   └── terminal.py    # TerminalTransport
 │       │
-│       ├── transport/               # transport layer — abstract port + adapters
-│       │   ├── __init__.py          # exports Transport, Message
-│       │   ├── base.py              # Transport ABC and Message dataclass
-│       │   ├── sqlite.py            # SQLiteTransport adapter
-│       │   └── terminal.py          # TerminalTransport adapter
-│       │
-│       ├── routing/                 # message routing logic
-│       │   ├── __init__.py
-│       │   └── router.py            # routing strategies (pipeline, supervisor, etc.)
-│       │
-│       ├── logging/                 # logging configuration and setup
-│       │   ├── __init__.py          # exports configure_logging, get_logger
-│       │   └── setup.py             # structlog processor chain configuration
-│       │
-│       └── cli/                     # entry points only — thin wrappers
+│       └── cli/               # entry points only — wire core to transport
 │           ├── __init__.py
-│           ├── main.py              # typer app definition — `run` and `send` commands
-│           ├── run.py               # implementation of `multiagent run`
-│           └── send.py              # implementation of `multiagent send`
+│           ├── main.py        # CLI app, command registration, Windows event loop
+│           ├── run.py         # `multiagent run` command
+│           ├── send.py        # `multiagent send` command
+│           ├── start.py       # `multiagent start` command
+│           ├── stop.py        # `multiagent stop` command
+│           ├── listen.py      # `multiagent listen` command
+│           ├── chat.py        # `multiagent chat` command
+│           └── version.py     # `multiagent version` command
 │
-├── tests/                           # mirrors src/multiagent/ structure
-│   ├── conftest.py                  # shared fixtures, mock LLM factory
+├── tasks/                     # task briefs and change requests
+│   ├── *.md
+│   └── plans/                 # implementation plans produced by Tom
+│       └── *-plan.md
+│
+├── tests/
+│   ├── conftest.py            # shared fixtures
+│   ├── fixtures/
+│   │   ├── agents.toml        # test agent configuration
+│   │   └── prompts/           # test prompt files
 │   ├── unit/
-│   │   ├── core/
-│   │   │   ├── test_agent.py
-│   │   │   └── test_runner.py
-│   │   ├── transport/
-│   │   │   ├── test_sqlite.py
-│   │   │   └── test_terminal.py
+│   │   ├── cli/
 │   │   ├── config/
-│   │   │   ├── test_settings.py
-│   │   │   └── test_agents.py       # AgentConfig loading and validation
-│   │   └── routing/
-│   │       └── test_router.py
-│   └── integration/                 # requires real LLM — gated by marker
-│       ├── conftest.py              # integration-specific fixtures (shared transport, agents)
-│       └── test_pipeline.py         # full researcher → critic pipeline
+│   │   ├── core/
+│   │   ├── scripts/
+│   │   └── transport/
+│   └── integration/
+│       ├── conftest.py
+│       └── test_pipeline.py
 │
-├── data/                            # runtime data — gitignored except .gitkeep
-│   └── .gitkeep                     # SQLite databases, queue files
+├── data/                      # gitignored runtime data
+│   ├── agents.db              # SQLite transport database
+│   ├── checkpoints.db         # LangGraph checkpoint database
+│   ├── costs.db               # cost ledger database
+│   └── .gitkeep
 │
-├── logs/                            # runtime log files — gitignored except .gitkeep
-│   └── .gitkeep                     # structlog file sink output (when configured)
-│
-├── prompts/                         # agent system prompt files — committed to git
-│   ├── researcher.md                # system prompt for the researcher agent
-│   └── critic.md                    # system prompt for the critic agent
-│
-├── scripts/                         # developer inspection and experiment tools
-│   ├── show_thread.py               # rich-formatted conversation thread from SQLite
-│   ├── show_run.py                  # rich-formatted summary of a single JSONL run file
-│   └── compare_runs.py              # side-by-side rich comparison of two run files
-│
-└── tasks/                           # Claude Code implementation briefs — permanent record
-    ├── README.md                    # task lifecycle and conventions
-    ├── 001-skeleton.md              # first task: project skeleton
-    ├── 002-transport.md             # second task: transport layer
-    ├── 003-agent-core.md            # third task: agent core
-    ├── 004-cli-wiring.md            # fourth task: CLI wiring and integration tests
-    └── 005-observability.md         # fifth task: dual logging, JSONL runs, inspection scripts
+└── logs/                      # gitignored run log files
+    └── .gitkeep
 ```
-
-### `.gitignore` — Required Entries
-
-```gitignore
-# Local configuration — never commit secrets
-.env
-
-# Runtime data — all contents ignored, folder tracked via .gitkeep
-data/*
-!data/.gitkeep
-
-# Log files — all contents ignored, folder tracked via .gitkeep
-logs/*
-!logs/.gitkeep
-
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-.ruff_cache/
-.mypy_cache/
-.pyright/
-
-# uv / packaging
-.venv/
-*.egg-info/
-dist/
-
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-```
-
-### Module Dependency Rules — Enforced
-
-The following import directions are **forbidden**. `pyright` and code review enforce this:
-
-```
-core/      MUST NOT import from  transport/
-core/      MUST NOT import from  cli/
-core/      MUST NOT import from  routing/
-transport/ MUST NOT import from  core/
-transport/ MUST NOT import from  cli/
-cli/       MAY import from       core/, transport/, routing/, config/, logging/
-routing/   MAY import from       transport/ (Message type only)
-```
-
-All modules MAY import from: `config/`, `logging/`, `exceptions.py`, `constants.py`
 
 ---
 
-## 4. Environment and Tooling Setup
+## 4. Architecture Principles
 
-### Python Version
+### 4.1 Ports and Adapters (Hexagonal Architecture)
 
-Python **3.12** is pinned. Enforce with `.python-version` file in repository root:
+The agent is the hexagon. Terminal and SQLite are adapters. `Transport` ABC is the
+port. The agent is tested and runs identically regardless of which adapter is plugged
+in.
+
+An agent must never know where its input came from or where its output goes. It
+receives a string and returns a string. Everything else is the transport's concern.
+
+### 4.2 Open/Closed Principle
+
+Open for extension, closed for modification:
+
+- Adding a new transport: create `transport/zeromq.py` implementing `Transport` ABC.
+  Touch nothing else.
+- Adding a new agent: define name, system prompt, routing config. Touch nothing in
+  core.
+- Adding a new router type: add a new class in `core/routing.py` and a new case in
+  `build_router()`. Touch nothing in agent or runner.
+
+### 4.3 Async-First
+
+The entire codebase is async. All methods that perform I/O — LLM calls, database
+reads/writes, polling loops — are `async def`. Synchronous wrappers (`asyncio.run()`)
+appear **only** at CLI entry points. This decision is irreversible cheaply — making
+it from day one costs nothing.
+
+### 4.4 Explicit Over Implicit
+
+- No magic. No dynamic attribute setting. No monkey-patching.
+- All configuration is validated at startup via pydantic-settings. The application
+  fails fast with a clear error if configuration is invalid.
+- All routing is declared in `agents.toml`. No routing logic is inferred from
+  naming conventions or runtime inspection.
+- Settings are passed via dependency injection. `load_settings()` is called once
+  at the CLI entry point and injected everywhere else. Never call `load_settings()`
+  inside library code.
+
+### 4.5 Failure Is Loud
+
+- Never swallow exceptions silently.
+- If you catch and do not re-raise, you must log at WARNING or ERROR.
+- The only exception: cost ledger write failures are caught and logged at WARNING
+  only — cost tracking must never degrade the LLM pipeline.
+- Shutdown is always clean. Ctrl-C exits with code 0 and a log event. Unhandled
+  exceptions exit with code 1 and a log event.
+
+---
+
+## 5. Module Dependency Rules
+
+These rules are absolute. They are enforced by code review and verified by grep
+after every task.
 
 ```
-3.12
+cli/          → may import from: core/, transport/, config/, exceptions
+core/         → may import from: config/, exceptions     [NEVER transport/ or cli/]
+transport/    → may import from: config/, exceptions     [NEVER core/ or cli/]
+config/       → may import from: exceptions              [NEVER core/ or transport/]
+scripts/      → may import from: config/, exceptions (via Settings only)
 ```
 
-`uv` reads this file automatically and provisions the correct interpreter.
+`rich` may be imported in `cli/` and `scripts/`. It must never be imported in
+`core/` or `transport/`.
 
-### uv Setup
+**Verification commands (must return empty after every task):**
 
 ```bash
-# Install uv (cross-platform)
-curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"  # Windows
-
-# Initialize project (run once)
-uv init --python 3.12 multiagent
-cd multiagent
-
-# Add dependencies
-uv add langgraph langchain-anthropic pydantic-settings structlog aiosqlite
-
-# Add development dependencies
-uv add --dev ruff pyright pytest pytest-asyncio pytest-mock respx pre-commit
-
-# Run anything in the venv
-uv run python -m multiagent
-uv run pytest
-uv run pyright
+grep -r "from multiagent.cli"       src/multiagent/core/
+grep -r "from multiagent.cli"       src/multiagent/transport/
+grep -r "from multiagent.transport" src/multiagent/core/
+grep -r "from multiagent.core"      src/multiagent/transport/
+grep -r "import rich"               src/multiagent/core/
+grep -r "import rich"               src/multiagent/transport/
 ```
 
-### pyproject.toml — Complete Configuration
+---
+
+## 6. Configuration Contract
+
+### 6.1 Layered Loading
+
+```
+.env.defaults  (committed — documents every key, safe defaults)
+    ↓ override
+.env           (gitignored — local developer values, secrets)
+    ↓ override
+OS environment variables  (CI, Docker, test runners)
+```
+
+For tests, `.env.test` is loaded by the `test_settings` fixture and overrides
+all of the above.
+
+### 6.2 Contract Rules
+
+- Every settings field has a default in `.env.defaults`. Required fields (no
+  default) are documented with a comment explaining where to set them.
+- Secrets (`OPENROUTER_API_KEY`, `GREETING_SECRET`) have no default and must
+  be set in `.env`. They must never appear in `.env.defaults` or committed files.
+- `load_settings()` is the only way to construct `Settings`. It raises
+  `InvalidConfigurationError` on validation failure. It is called once at the
+  CLI entry point.
+- Settings are immutable after construction for the lifetime of the process,
+  with the exception of `experiment` which may be set by the CLI before agent
+  construction.
+- `extra="forbid"` is set on `Settings`. Unknown environment variable names
+  that match the settings prefix cause startup failure — prevents silent typo
+  misconfigurations.
+
+### 6.3 Adding a New Setting
+
+1. Add the field to `Settings` in `config/settings.py` with a type, default,
+   and `description=`
+2. Add the corresponding key to `.env.defaults` with a comment
+3. Add `field_name=<test_value>` to the `test_settings` fixture in `conftest.py`
+
+### 6.4 Settings Fields Reference
+
+The canonical source of truth is `settings.py` and `.env.defaults`. This table
+documents fields by group for orientation.
+
+| Group | Fields |
+|---|---|
+| App | `app_name`, `app_env`, `greeting_message`, `greeting_secret` |
+| LLM | `openrouter_api_key`, `openrouter_base_url`, `llm_model`, `llm_max_tokens`, `llm_timeout_seconds` |
+| Transport | `transport_backend`, `sqlite_db_path`, `sqlite_poll_interval_seconds` |
+| Checkpointer | `checkpointer_db_path` |
+| Cost | `cost_db_path` |
+| Observability | `log_console_enabled`, `log_console_level`, `log_human_file_enabled`, `log_human_file_level`, `log_json_file_enabled`, `log_json_file_level`, `log_dir`, `log_trace_llm`, `experiment` |
+| Agent config | `prompts_dir`, `agents_config_path` |
+| CLI | `chat_reply_timeout_seconds` |
+
+---
+
+## 7. Observability Contract
+
+### 7.1 Three Independent Streams
+
+Every run produces up to three independent output streams:
+
+| Stream | File | Renderer | LLM trace |
+|---|---|---|---|
+| Console | stdout | ConsoleRenderer (colors) | suppressed |
+| Human file | `logs/{timestamp}_{agent}[_{experiment}].log` | ConsoleRenderer (no colors) | suppressed |
+| JSON file | `logs/{timestamp}_{agent}[_{experiment}].jsonl` | JSONRenderer | included |
+
+Each stream is independently enabled/disabled and has its own log level.
+
+### 7.2 `configure_logging()` Contract
+
+Signature: `configure_logging(settings, agent_name, experiment) -> tuple[Path | None, Path | None]`
+
+Returns paths to the human log file and JSON log file (or `None` if disabled).
+Called once at CLI startup before any log calls.
+
+### 7.3 Log Event Naming Convention
+
+Events are `snake_case` strings describing what happened. Prefer past tense:
+`message_received`, `agent_started`, `cluster_stopped`. Bind permanent context
+at class init (agent name, transport type). Bind ephemeral context per operation
+(thread_id, message_id).
+
+### 7.4 Log Level Discipline
+
+| Level | When |
+|---|---|
+| DEBUG | Internal state, poll ticks, prompt/response content, token counts |
+| INFO | Normal operational events — message received, sent, agent start/stop |
+| WARNING | Unexpected but recoverable — retry, slow response, cost write failure |
+| ERROR | Failure that was caught and handled — transport error, LLM API error |
+| CRITICAL | Unrecoverable — process about to exit |
+
+Never log at ERROR and then silently continue. Never log LLM prompt/response
+content at INFO — always DEBUG.
+
+### 7.5 `LOG_TRACE_LLM` Gate
+
+`llm_trace` events (full prompt and response content) are gated by
+`settings.log_trace_llm`. When false, these events are not emitted. They are
+suppressed at the console and human file streams regardless.
+
+---
+
+## 8. Transport Contract
+
+### 8.1 What Transport Owns
+
+The transport is responsible for message persistence, retrieval, and at-least-once
+delivery semantics. Unacknowledged messages are re-delivered.
+
+The transport is not responsible for knowing what agents exist, what messages mean,
+or making routing decisions.
+
+### 8.2 `Message` Fields Contract
+
+| Field | Type | Who sets it |
+|---|---|---|
+| `from_agent` | `str` | CLI send sets `"human"`. AgentRunner sets agent name. |
+| `to_agent` | `str` | AgentRunner resolves from routing. `"human"` is valid. |
+| `body` | `str` | Message content. |
+| `thread_id` | `str` | UUID. CLI generates or accepts `--thread-id`. Propagated unchanged. |
+| `id` | `int \| None` | Set by transport on persistence. |
+| `created_at` | `datetime \| None` | Set by transport on persistence. |
+| `processed_at` | `datetime \| None` | Set by transport on `ack()`. |
+
+### 8.3 `Transport` ABC Contract
+
+Three methods, all async, all must be safe for concurrent agent coroutines:
+
+- `receive(agent_name)` — fetch oldest unprocessed message. Does not mark as
+  processed. Returns `None` if inbox is empty.
+- `send(message)` — persist message. `thread_id` must be populated.
+- `ack(message_id)` — mark message as processed.
+
+### 8.4 `human` as a Recipient
+
+`"human"` is a valid `to_agent` value. The transport treats it identically to any
+other agent name. The `listen` and `chat` CLI commands consume these messages.
+
+### 8.5 WAL Mode
+
+`SQLiteTransport` enables WAL journal mode. Required for the cluster pattern where
+multiple `AgentRunner` coroutines share one transport instance.
+
+---
+
+## 9. Agent Contract
+
+### 9.1 What an Agent Is
+
+An `LLMAgent` is a LangGraph graph with a fixed system prompt. It accepts a string
+input and a `thread_id`, calls the LLM via OpenRouter, records cost, and returns
+the LLM's response. It has no knowledge of transport, routing, or I/O.
+
+### 9.2 `LLMAgent` Construction Contract
+
+Required parameters: `name`, `settings`, `checkpointer`, `cost_ledger`.
+Optional: `router` (defaults to `None` for static routing).
+
+The system prompt is loaded from `{settings.prompts_dir}/{name}.md` at construction.
+It is not passed as a parameter.
+
+### 9.3 LangGraph State Contract
+
+Agents use `MessagesState` from LangGraph. The graph accumulates the full message
+history, giving agents conversation memory within a thread via the checkpointer.
+Custom `TypedDict` state is not used.
+
+### 9.4 Checkpointer Lifecycle Contract
+
+The CLI owns the checkpointer lifecycle via `async with AsyncSqliteSaver.from_conn_string(...)`.
+Unit tests use `MemorySaver()`. The checkpointer database parent directory is
+created by the CLI before opening.
+
+### 9.5 Cost Ledger Lifecycle Contract
+
+The CLI owns the cost ledger lifecycle via `async with CostLedger(settings.cost_db_path)`,
+nested inside the checkpointer block. Unit tests use the `mock_cost_ledger` fixture.
+
+Cost write failures are caught inside `CostLedger.record()` and logged at WARNING.
+They never propagate to the agent or pipeline.
+
+`CostLedger` receives `db_path: Path` directly — it does not import from `config/`.
+
+### 9.6 `AgentRunner` Contract
+
+`AgentRunner` is the only component holding both an agent and a transport reference.
+It polls the transport, invokes the agent, resolves the next destination, and sends
+the response. It respects `ShutdownMonitor` between iterations.
+
+### 9.7 Shutdown Contract
+
+`ShutdownMonitor` watches for a stop file and OS signals. When triggered, the current
+message completes before the runner exits. Shutdown is always clean.
+
+---
+
+## 10. Routing Contract
+
+### 10.1 Static Routing (default)
+
+`next_agent = "name"` in `agents.toml` routes every message to that destination.
+No `next_agent` means terminal agent — processes the message, sends no reply.
+
+### 10.2 Dynamic Routing
+
+`router = "name"` in `agents.toml` routes based on the LLM's output at runtime.
+An agent may have `next_agent` OR `router`, never both — `ConfigurationError` if
+both are present.
+
+### 10.3 Router Types
+
+**Keyword router** — scans agent output for trigger strings, no additional LLM
+call. Use when output format is deterministic.
+
+**LLM classifier router** — second lightweight LLM call returning exactly one route
+key. Use when routing requires semantic understanding. Use a cheap, fast model.
+
+### 10.4 `agents.toml` Schema
 
 ```toml
-[project]
-name = "multiagent"
-version = "0.1.0"
-description = "Multi-agent LLM system proof of concept"
-requires-python = ">=3.12,<3.13"
-dependencies = [
-    "langgraph>=0.2",
-    "langchain-anthropic>=0.2",
-    "pydantic-settings>=2.0",
-    "structlog>=24.0",
-    "aiosqlite>=0.20",
-]
+[agents.editor]
+router = "editorial_gate"          # dynamic routing
 
-[project.optional-dependencies]
-dev = [
-    "ruff",
-    "pyright",
-    "pytest",
-    "pytest-asyncio",
-    "pytest-mock",
-    "respx",
-    "pre-commit",
-]
+[agents.writer]
+next_agent = "linguist"            # static routing — unchanged, backward compatible
 
-[project.scripts]
-multiagent = "multiagent.cli.run:main"
+[routers.editorial_gate]
+type = "keyword"                   # or "llm"
+routes.writer = ["WRITER BRIEF"]   # trigger strings → destination
+default = "human"                  # fallback
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/multiagent"]
-
-# --- ruff ---
-[tool.ruff]
-target-version = "py312"
-line-length = 100
-src = ["src", "tests"]
-
-[tool.ruff.lint]
-select = [
-    "E",    # pycodestyle errors
-    "W",    # pycodestyle warnings
-    "F",    # pyflakes
-    "I",    # isort
-    "B",    # flake8-bugbear
-    "C4",   # flake8-comprehensions
-    "UP",   # pyupgrade
-    "ANN",  # flake8-annotations (enforce type hints)
-    "D",    # pydocstyle (enforce docstrings)
-    "ASYNC",# flake8-async
-    "RUF",  # ruff-specific rules
-]
-ignore = [
-    "D100", # missing docstring in public module (handled by __init__.py convention)
-    "D104", # missing docstring in public package
-    "ANN101", # missing type annotation for self
-    "ANN102", # missing type annotation for cls
-]
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ANN", "D"]   # relax annotations and docstrings in tests
-
-# --- pyright ---
-[tool.pyright]
-include = ["src", "tests"]
-pythonVersion = "3.12"
-typeCheckingMode = "strict"
-reportMissingImports = true
-reportMissingTypeStubs = false
-venvPath = "."
-venv = ".venv"
-
-# --- pytest ---
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
-markers = [
-    "integration: marks tests as integration tests requiring real LLM (deselect with -m 'not integration')",
-    "slow: marks tests as slow",
-]
-addopts = "-v --tb=short -m 'not integration'"
-
-# --- coverage ---
-[tool.coverage.run]
-source = ["src/multiagent"]
-omit = ["src/multiagent/cli/*"]   # CLI entry points excluded from coverage target
-
-[tool.coverage.report]
-fail_under = 80
-show_missing = true
+# For llm type:
+# prompt = "prompts/routers/gate.md"
+# model = ""                       # empty = use settings.llm_model
 ```
 
-### Pre-commit Configuration
+### 10.5 Backward Compatibility Rule
 
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.0
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
+All existing `next_agent` entries continue to work unchanged. No migration required.
 
-  - repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.350
-    hooks:
-      - id: pyright
-```
+### 10.6 `human` as a Routing Destination
 
-Install hooks after cloning:
-
-```bash
-uv run pre-commit install
-```
+Any router may route to `"human"`. The `listen` or `chat` command picks up the
+message.
 
 ---
 
-## 5. Configuration System
+## 11. Exception Hierarchy
 
-### Layered Loading
-
-Configuration is loaded in the following order. Later sources override earlier ones.
-This order is fixed and must not be changed.
+All custom exceptions live exclusively in `src/multiagent/exceptions.py`.
 
 ```
-Priority 1 (lowest):  .env.defaults    — committed, documents every key, safe defaults
-Priority 2:           .env             — gitignored, local developer overrides
-Priority 3:           .env.test        — committed, used when pytest runs
-Priority 4 (highest): Process env vars — injected in production / CI
+MultiAgentError
+├── ConfigurationError
+│   ├── MissingConfigurationError
+│   └── InvalidConfigurationError
+├── TransportError
+│   ├── MessageDeliveryError
+│   ├── MessageReceiveError
+│   ├── TransportConnectionError
+│   └── MessageAcknowledgementError
+├── AgentError
+│   ├── AgentTimeoutError
+│   ├── AgentLLMError
+│   └── AgentConfigurationError
+└── RoutingError
+    └── UnknownAgentError
 ```
 
-### Settings Class
+### Handling Rules
 
-Location: `src/multiagent/config/settings.py`
-
-```python
-from __future__ import annotations
-
-from functools import lru_cache
-from pathlib import Path
-
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class Settings(BaseSettings):
-    """Application-wide configuration loaded from environment and .env files.
-
-    All settings have type validation and documented defaults. Unknown environment
-    variables cause a startup failure (extra='forbid') to catch typos early.
-
-    The double-underscore delimiter allows nested configuration via env vars:
-    AGENT__DEFAULT_TIMEOUT_SECONDS=90 maps to settings.agent.default_timeout_seconds
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=(".env.defaults", ".env"),
-        env_file_encoding="utf-8",
-        env_nested_delimiter="__",
-        case_sensitive=False,
-        extra="forbid",
-    )
-
-    # LLM
-    openrouter_api_key: str = Field(..., description="OpenRouter API key. Required.")
-    openrouter_base_url: str = Field(
-        "https://openrouter.ai/api/v1",
-        description="OpenRouter API base URL. Override only in tests or when self-hosting.",
-    )
-    llm_model: str = Field(
-        "anthropic/claude-sonnet-4-5",
-        description="OpenRouter model routing string. Format: provider/model-name.",
-    )
-    llm_max_tokens: int = Field(1024, ge=1, le=8192, description="Maximum response tokens.")
-    llm_timeout_seconds: float = Field(30.0, gt=0, description="LLM call timeout in seconds.")
-
-    # Transport
-    transport_backend: str = Field(
-        "sqlite", pattern="^(sqlite|terminal)$", description="Active transport backend."
-    )
-    sqlite_db_path: Path = Field(Path("data/agents.db"), description="SQLite database file path.")
-    sqlite_poll_interval_seconds: float = Field(1.0, gt=0, description="Mailbox poll interval.")
-    sqlite_wal_mode: bool = Field(True, description="Enable WAL journal mode for concurrency.")
-
-    # Logging
-    log_level: str = Field(
-        "INFO",
-        pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
-        description="Minimum log level.",
-    )
-    log_format: str = Field(
-        "console",
-        pattern="^(console|json)$",
-        description="Log renderer: console for dev, json for production.",
-    )
-
-    # Agent defaults
-    agent_default_timeout_seconds: float = Field(60.0, gt=0)
-    agent_max_retries: int = Field(3, ge=0)
-    agent_retry_backoff_seconds: float = Field(2.0, gt=0)
-
-    # Prompts
-    prompts_dir: Path = Field(
-        Path("prompts"),
-        description="Directory containing agent system prompt .md files. "
-                    "Each agent loads {prompts_dir}/{agent_name}.md at construction.",
-    )
-
-    # Agent wiring
-    agents_config_path: Path = Field(
-        Path("agents.toml"),
-        description="Path to the agents configuration file. "
-                    "Declares all agents and their next_agent routing.",
-    )
-
-    # Checkpointer
-    checkpointer_db_path: Path = Field(
-        Path("data/checkpoints.db"),
-        description="Path to LangGraph checkpoint database. "
-                    "Stores full conversation history per thread_id. "
-                    "Separate from the message transport database.",
-    )
-
-    # Observability — console stream
-    log_console_enabled: bool = Field(
-        True,
-        description="Emit log events to stdout. Disable to suppress all console output.",
-    )
-    log_console_level: str = Field(
-        "INFO",
-        pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
-        description="Minimum log level for console output.",
-    )
-
-    # Observability — human-readable log file stream (.log)
-    log_human_file_enabled: bool = Field(
-        False,
-        description="Write a per-run human-readable log file alongside console output.",
-    )
-    log_human_file_level: str = Field(
-        "INFO",
-        pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
-        description="Minimum log level for the human-readable log file.",
-    )
-
-    # Observability — JSON Lines log file stream (.jsonl)
-    log_json_file_enabled: bool = Field(
-        False,
-        description="Write a per-run JSONL log file. Intended for agent-based analysis.",
-    )
-    log_json_file_level: str = Field(
-        "DEBUG",
-        pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
-        description="Minimum log level for the JSONL log file. Defaults to DEBUG to "
-                    "capture maximum detail for experiment analysis.",
-    )
-
-    # Observability — shared
-    log_dir: Path = Field(
-        Path("logs"),
-        description="Directory for per-run log files. Both .log and .jsonl land here.",
-    )
-    log_trace_llm: bool = Field(
-        False,
-        description="Include full LLM prompt and response content in the JSONL log file. "
-                    "Never emitted to console or human-readable file. "
-                    "Only effective when log_json_file_enabled=True.",
-    )
-    experiment: str = Field(
-        "",
-        description="Optional experiment label included in log filenames. "
-                    "Override per-run with the --experiment CLI flag.",
-    )
-
-
-@lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    """Return the singleton Settings instance.
-
-    Cached after first call. In tests, call get_settings.cache_clear() between
-    test cases that modify environment variables.
-
-    Returns:
-        The validated Settings instance.
-
-    Raises:
-        ValidationError: If required settings are missing or values are invalid.
-    """
-    return Settings()
-```
-
-### .env.defaults (committed to git)
-
-```bash
-# ============================================================
-# MULTI-AGENT SYSTEM — CONFIGURATION REFERENCE
-# ============================================================
-# This file documents every configuration key accepted by the
-# application. It is committed to git and contains safe defaults.
-#
-# To override locally: copy values to .env (gitignored)
-# In production: set process environment variables directly
-# ============================================================
-
-# --- LLM ---
-# OPENROUTER_API_KEY=          # REQUIRED. No default. Must be set in .env or env.
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-LLM_MODEL=anthropic/claude-sonnet-4-5
-LLM_MAX_TOKENS=1024
-LLM_TIMEOUT_SECONDS=30.0
-
-# --- TRANSPORT ---
-TRANSPORT_BACKEND=sqlite      # sqlite | terminal
-SQLITE_DB_PATH=data/agents.db
-SQLITE_POLL_INTERVAL_SECONDS=1.0
-SQLITE_WAL_MODE=true
-
-# --- LOGGING ---
-# Legacy single-level settings preserved for backward compatibility.
-# Per-stream settings below take precedence.
-LOG_LEVEL=INFO
-LOG_FORMAT=console
-
-# --- AGENT DEFAULTS ---
-AGENT_DEFAULT_TIMEOUT_SECONDS=60.0
-AGENT_MAX_RETRIES=3
-AGENT_RETRY_BACKOFF_SECONDS=2.0
-
-# --- PROMPTS ---
-PROMPTS_DIR=prompts
-
-# --- AGENT WIRING ---
-AGENTS_CONFIG_PATH=agents.toml
-
-# --- OBSERVABILITY ---
-# Console stream
-LOG_CONSOLE_ENABLED=true
-LOG_CONSOLE_LEVEL=INFO
-
-# Human-readable log file (.log) — disabled by default
-LOG_HUMAN_FILE_ENABLED=false
-LOG_HUMAN_FILE_LEVEL=INFO
-
-# JSON Lines log file (.jsonl) — disabled by default
-LOG_JSON_FILE_ENABLED=false
-LOG_JSON_FILE_LEVEL=DEBUG
-
-# Shared
-LOG_DIR=logs
-LOG_TRACE_LLM=false           # JSONL file only; console and .log never receive trace events
-# EXPERIMENT=                  # optional label in filenames; override with --experiment flag
-```
-
-### .env.test (committed to git)
-
-```bash
-# Test environment overrides.
-# Applied automatically when pytest sets ENVIRONMENT=test.
-OPENROUTER_API_KEY=test-key-not-real
-TRANSPORT_BACKEND=sqlite
-SQLITE_DB_PATH=:memory:
-LOG_LEVEL=WARNING
-LOG_FORMAT=console
-```
-
-### .gitignore entries
-
-```gitignore
-.env
-.env.local
-.env.production
-data/
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.ruff_cache/
-```
+- Catch at the most specific level where recovery is possible.
+- Catch `MultiAgentError` only at the process boundary for final logging.
+- Never catch bare `Exception` except at the top of `cli/main.py`.
+- Always chain: `raise AgentLLMError("...") from original_exc`.
+- Never swallow silently — always log at WARNING or ERROR before suppressing.
 
 ---
 
-## 6. Logging Standards
+## 12. Python Standards
 
-### Library
+### 12.1 Type Annotations
 
-`structlog` is the sole logging library. The stdlib `logging` module is not used
-directly in application code. `structlog` is configured to route through stdlib
-`logging` for compatibility with third-party libraries.
+Mandatory on every function, method, and class attribute. `pyright` strict mode
+enforces this. No `Any` without a justifying comment.
 
-### Logger Instantiation — One Pattern, Always
+### 12.2 Docstrings
 
-Every module that emits log events declares one module-level logger using `__name__`:
+Google style. Every public module, class, and method. Private methods where logic
+is non-obvious. `ruff` does not enforce docstrings — followed by convention only.
 
-```python
-import structlog
+### 12.3 Comments
 
-log = structlog.get_logger(__name__)
-```
+Explain **why**, not **what**. If a comment describes what the next line does,
+rewrite the line to be self-documenting.
 
-This is the **only** way to obtain a logger. Loggers are never passed as arguments,
-never stored on instances as constructor arguments, and never retrieved by string name.
+### 12.4 Naming
 
-### Context Binding
-
-Loggers carry context. Bind permanent context at class instantiation; bind ephemeral
-context (per-operation) at operation start:
-
-```python
-class AgentRunner:
-    def __init__(self, agent: LLMAgent, transport: Transport) -> None:
-        # Permanent context — every log from this instance carries these fields
-        self._log = structlog.get_logger(__name__).bind(
-            agent=agent.name,
-            transport=type(transport).__name__,
-        )
-
-    async def run_once(self) -> bool:
-        msg = await self.transport.receive(self.agent.name)
-        if not msg:
-            return False
-        # Ephemeral context — scoped to this operation
-        op_log = self._log.bind(thread_id=msg.thread_id, msg_id=msg.id)
-        op_log.info("message_received")
-        ...
-        op_log.info("message_processed", response_chars=len(response))
-        return True
-```
-
-### Logger Hierarchy
-
-```
-root
-└── multiagent
-    ├── multiagent.config.settings
-    ├── multiagent.core.agent
-    ├── multiagent.core.runner
-    ├── multiagent.transport.sqlite
-    ├── multiagent.transport.terminal
-    ├── multiagent.routing.router
-    ├── multiagent.logging.setup
-    └── multiagent.cli.run
-```
-
-### Log Level Discipline
-
-| Level | Rule |
+| Element | Convention |
 |---|---|
-| `DEBUG` | Internal state dumps, every poll tick. Off in production. |
-| `INFO` | One event per significant operation: message received, sent, agent started/stopped. |
-| `WARNING` | Retry attempted, degraded mode, config fallback used. Actionable but not an error. |
-| `ERROR` | Caught exception that affected an operation. Always include `exc_info=True`. |
-| `CRITICAL` | Unrecoverable. Process is about to exit. |
+| Module | `snake_case` |
+| Class | `PascalCase` |
+| Function/method | `snake_case` |
+| Constant | `UPPER_SNAKE_CASE` |
+| Private | `_single_prefix` |
+| Type alias | `PascalCase` |
 
-**LLM trace events** are a special category emitted at `INFO` level with `event="llm_trace"`.
-They carry the full prompt and response content and are only emitted when
-`settings.log_trace_llm` is `True`. They are always written to the JSONL file when file
-logging is enabled, never to the console renderer.
+### 12.5 Import Rules
 
-**Rule:** Never log at `ERROR` without an exception context. Never log at `DEBUG` in a
-tight loop without first checking that DEBUG is enabled (performance).
+Absolute imports only — no relative imports. `ruff` enforces order:
+stdlib → third-party → local. No star imports.
 
-### Three-Stream Output Design
+### 12.6 `print()` Usage
 
-Each stream is independently toggled and independently level-filtered. All three
-share the same structlog processor chain up to the renderer stage.
+`print()` and `typer.echo()` are acceptable in `cli/` and `scripts/`. They must
+never appear in `core/` or `transport/`. All diagnostic output in library code
+goes through `structlog`.
 
-| Stream | Toggle | Level setting | Renderer | Receives `llm_trace` |
-|---|---|---|---|---|
-| Console | `log_console_enabled` | `log_console_level` | `ConsoleRenderer(colors=True)` | Never |
-| Human file (`.log`) | `log_human_file_enabled` | `log_human_file_level` | `ConsoleRenderer(colors=False)` | Never |
-| JSON file (`.jsonl`) | `log_json_file_enabled` | `log_json_file_level` | `JSONRenderer()` | Yes (when `log_trace_llm=True`) |
+### 12.7 Path Handling
 
-`llm_trace` events are suppressed from console and human file via a
-`logging.Filter` subclass applied to those two handlers. The JSONL handler
-receives all events unfiltered.
+`pathlib.Path` everywhere. No string path concatenation. `Path.mkdir(parents=True,
+exist_ok=True)` before any file creation. Required for Windows compatibility.
 
-Both file types use the same timestamp prefix and experiment label, landing
-in `log_dir` side by side:
+### 12.8 Datetime
 
-```
-logs/2026-03-13T14-32-01_progressive_debate.log
-logs/2026-03-13T14-32-01_progressive_debate.jsonl
-logs/2026-03-13T14-32-01_conservative_debate.log
-logs/2026-03-13T14-32-01_conservative_debate.jsonl
-```
-
-Filename construction: `{timestamp}_{agent_name}[_{experiment}].{ext}`
-
-Concurrent agents produce separate, identifiable files. The agent name is always
-present. The experiment label is omitted when empty.
-
-`configure_logging()` returns a `tuple[Path | None, Path | None]` — the human
-file path and the JSONL file path. Either is `None` if that stream is disabled.
-
-### Logging Setup
-
-Location: `src/multiagent/logging/setup.py`
-
-`configure_logging()` signature as of Task 005:
-
-```python
-def configure_logging(
-    settings: Settings,
-    agent_name: str = "",
-    experiment: str = "",
-) -> tuple[Path | None, Path | None]:
-    """Configure structlog with up to three independent output streams.
-
-    Attaches up to three stdlib logging handlers based on settings:
-      - Console handler: ConsoleRenderer (colours) to stdout
-      - Human file handler: ConsoleRenderer (no colours) to per-run .log file
-      - JSON file handler: JSONRenderer to per-run .jsonl file
-
-    Each handler has its own level filter. llm_trace events are suppressed
-    from console and human file handlers via _SuppressLLMTrace filter.
-
-    The effective experiment label is resolved in order:
-      1. experiment argument (CLI --experiment flag)
-      2. settings.experiment (env var / .env)
-      3. Empty string (omitted from filename)
-
-    Must be called once at process startup before any logging occurs.
-    Call from CLI entry points only, never from library code.
-
-    Args:
-        settings: Validated application settings.
-        agent_name: Name of the running agent. Always included in filenames
-            so concurrent agents produce separate, identifiable log files.
-        experiment: Experiment label from CLI flag. Overrides settings.experiment.
-
-    Returns:
-        Tuple of (human_log_path, json_log_path). Either is None if that
-        stream is disabled.
-
-    Raises:
-        OSError: If the log directory cannot be created.
-    """
-```
+Use `datetime.now(UTC)` (Python 3.12+). Never `datetime.utcnow()` (deprecated).
 
 ---
 
-## 7. Exception Hierarchy
+## 13. Testing Strategy
 
-Location: `src/multiagent/exceptions.py`
+### 13.1 Two Tiers
 
-All custom exceptions inherit from `MultiAgentError`. This allows callers to catch the
-entire domain with a single except clause at process boundaries.
+**Unit tests** (`tests/unit/`) — fast, mocked, no LLM calls, no file I/O except
+`tmp_path` SQLite databases. All new behaviour must have unit test coverage.
 
-```python
-class MultiAgentError(Exception):
-    """Base exception for all multiagent system errors."""
+**Integration tests** (`tests/integration/`) — real LLM calls, real databases.
+Gated by `@pytest.mark.integration`. Require `OPENROUTER_API_KEY`.
 
+### 13.2 Mock Boundaries
 
-# ── Configuration ────────────────────────────────────────────────────────────
+| Component | Unit test approach |
+|---|---|
+| LLM | Mock `ChatOpenAI.ainvoke` to return `AIMessage` with `usage_metadata` and `response_metadata` |
+| Transport | Real `SQLiteTransport` with `tmp_path` database |
+| Checkpointer | `MemorySaver()` — never `AsyncSqliteSaver` in unit tests |
+| Cost ledger | `mock_cost_ledger` fixture (`AsyncMock(spec=CostLedger)`) |
 
-class ConfigurationError(MultiAgentError):
-    """Raised when configuration is missing or invalid. Occurs at startup."""
+### 13.3 Shared Fixtures (`conftest.py`)
 
+| Fixture | Purpose |
+|---|---|
+| `test_settings` | `Settings` with test overrides, in-memory DBs |
+| `mock_llm` | Patches `ChatOpenAI.ainvoke`, returns `AIMessage` with metadata |
+| `mock_llm_response` | Plain string: the mock LLM response body |
+| `sample_message` | A `Message` instance for transport tests |
+| `sqlite_transport` | Real `SQLiteTransport` against `tmp_path` database |
+| `mock_cost_ledger` | `AsyncMock(spec=CostLedger)` |
 
-class MissingConfigurationError(ConfigurationError):
-    """Raised when a required configuration key has no value."""
+### 13.4 Script Tests
 
+Scripts are tested via `subprocess.run`. Override database paths via environment
+variables (`SQLITE_DB_PATH`, `COST_DB_PATH`) in the subprocess env — never via
+`--db` flags. Use `tmp_path` databases with known content.
 
-class InvalidConfigurationError(ConfigurationError):
-    """Raised when a configuration value fails type or constraint validation."""
+### 13.5 Test the Failure Path
 
-
-# ── Transport ─────────────────────────────────────────────────────────────────
-
-class TransportError(MultiAgentError):
-    """Raised when message transport operations fail."""
-
-
-class MessageDeliveryError(TransportError):
-    """Raised when a message cannot be delivered after all configured retries."""
-
-
-class MessageReceiveError(TransportError):
-    """Raised when message retrieval from the transport backend fails."""
-
-
-class TransportConnectionError(TransportError):
-    """Raised when the transport backend is unavailable or unreachable."""
-
-
-# ── Agent ─────────────────────────────────────────────────────────────────────
-
-class AgentError(MultiAgentError):
-    """Raised when an agent fails to process a message."""
-
-
-class AgentTimeoutError(AgentError):
-    """Raised when an agent exceeds its configured execution time limit."""
-
-
-class AgentLLMError(AgentError):
-    """Raised when the LLM API returns an error or an unparseable response."""
-
-
-# ── Routing ───────────────────────────────────────────────────────────────────
-
-class RoutingError(MultiAgentError):
-    """Raised when the routing layer cannot determine the next agent."""
-
-
-class UnknownAgentError(RoutingError):
-    """Raised when a message is addressed to an agent that does not exist."""
-```
-
-### Exception Handling Rules
-
-1. Catch at the **most specific** subclass possible in agent/transport code.
-2. Catch `MultiAgentError` only at the runner/process boundary for final logging and exit.
-3. **Never** catch `Exception` or `BaseException` except at the absolute top of a CLI entry point.
-4. Always include `exc_info=True` when logging a caught exception at `ERROR` level.
-5. Always re-raise or wrap when catching in the middle of the call stack — never swallow.
+Every component with a graceful failure mode must have a test asserting that
+failure does not propagate — cost ledger, shutdown monitor, routing fallback.
 
 ---
 
-## 8. Architecture and Module Boundaries
+## 14. Scripts and Inspection Tools
 
-### The Message Dataclass
+### 14.1 What Scripts Are
 
-The `Message` dataclass is the **only** type that crosses the boundary between the
-transport layer and the agent runner. It lives in `transport/base.py`.
+Scripts in `scripts/` are developer inspection tools, not CLI commands. Run
+directly: `uv run python scripts/show_thread.py`. All have `just` targets.
 
-```python
-from __future__ import annotations
+### 14.2 Database Path Contract
 
-import uuid
-from dataclasses import dataclass, field
-from datetime import datetime
+Scripts read database paths from `Settings()` only. No `--db` flag, no hardcoded
+paths. This is non-negotiable.
 
+### 14.3 Graceful Degradation
 
-@dataclass
-class Message:
-    """A unit of communication between agents.
+Scripts must never crash when a database does not exist or is empty. Missing
+`costs.db` means cost tracking has not run — show `—` in cost columns.
 
-    Instances of this class cross the transport/core boundary. The core layer
-    receives and produces Message objects; it never touches transport internals.
+### 14.4 Current Scripts
 
-    The to_agent field accepts a single agent name, a list of agent names, or
-    the broadcast sentinel "*". The transport layer resolves lists and "*" into
-    individual per-recipient rows before persistence — the dataclass itself
-    carries the caller's original addressing intent.
-
-    All timestamps are UTC. Timestamps are set by the transport at the
-    relevant lifecycle event — never by the caller except created_at.
-
-    Attributes:
-        from_agent: Sending agent name, or "human" for external injection.
-        to_agent: Recipient — single name, list of names, or "*" for broadcast.
-        body: Message payload — plain text.
-        subject: Optional topic label for routing. Empty string if unused.
-        thread_id: UUID grouping all messages in one conversation chain.
-            Defaults to a new UUID — callers should pass an existing thread_id
-            when continuing a thread.
-        parent_id: Database id of the message this is a direct reply to.
-            None for thread-initiating messages.
-        id: Database-assigned integer id. None until persisted.
-        created_at: UTC timestamp of object construction. Set by caller.
-        sent_at: UTC timestamp when transport.send() persisted the message.
-            Set by transport — None until send() is called.
-        received_at: UTC timestamp when transport.receive() fetched this message.
-            Set by transport — None until an agent polls and receives it.
-        processed_at: UTC timestamp when transport.ack() was called.
-            Set by transport — None until processing is confirmed complete.
-    """
-
-    from_agent: str
-    to_agent: str | list[str]
-    body: str
-    subject: str = ""
-    thread_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    parent_id: int | None = None
-    id: int | None = None
-    created_at: datetime | None = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
-    sent_at: datetime | None = None
-    received_at: datetime | None = None
-    processed_at: datetime | None = None
-```
-
-**Import note:** `timezone` must be imported from `datetime`:
-```python
-from datetime import datetime, timezone
-```
-
-### The Transport Abstract Base Class
-
-```python
-from abc import ABC, abstractmethod
-
-
-class Transport(ABC):
-    """Abstract port for agent message I/O.
-
-    Concrete adapters implement this interface. Agent code depends only on
-    this abstraction — never on concrete adapter classes.
-
-    Fanout semantics: when message.to_agent is a list or "*", send() expands
-    the message into one delivery per resolved recipient before persistence.
-    The abstract interface accepts the full addressing intent; adapters own
-    the expansion logic.
-    """
-
-    @abstractmethod
-    async def receive(self, agent_name: str) -> Message | None:
-        """Fetch the next unprocessed message addressed to agent_name.
-
-        Non-blocking — returns None immediately if no message is available.
-        The runner loop is responsible for polling and backoff.
-
-        Sets received_at on the returned Message to UTC now.
-
-        Args:
-            agent_name: The name of the agent whose mailbox to check.
-
-        Returns:
-            The next Message, or None if the mailbox is empty.
-
-        Raises:
-            MessageReceiveError: If the backend fails during retrieval.
-        """
-
-    @abstractmethod
-    async def send(self, message: Message) -> None:
-        """Deliver a message to the transport backend.
-
-        Handles fanout: if message.to_agent is a list, one row is written
-        per recipient. If message.to_agent is "*", the transport resolves
-        the recipient list from previously seen agent names and fans out.
-
-        Sets sent_at on each persisted row to UTC now.
-
-        Args:
-            message: The Message to deliver. to_agent may be str, list, or "*".
-
-        Raises:
-            MessageDeliveryError: If persistence fails.
-            TransportConnectionError: If the backend is unavailable.
-        """
-
-    @abstractmethod
-    async def ack(self, message_id: int) -> None:
-        """Mark a message as processed so it is not delivered again.
-
-        Sets processed_at on the row to UTC now.
-
-        Args:
-            message_id: The id of the Message to acknowledge.
-
-        Raises:
-            MessageAcknowledgementError: If the ack cannot be persisted.
-        """
-
-    @abstractmethod
-    async def known_agents(self) -> list[str]:
-        """Return all agent names seen as to_agent recipients.
-
-        Used by send() to resolve broadcast "*" to a concrete recipient list.
-        Returns an empty list if no messages have been persisted yet.
-
-        Returns:
-            Sorted list of distinct agent name strings.
-
-        Raises:
-            TransportConnectionError: If the backend is unavailable.
-        """
-
-    @abstractmethod
-    async def close(self) -> None:
-        """Release all resources held by this transport instance."""
-```
-
-### SQLite Schema
-
-The schema is owned by `SQLiteTransport` and applied via `_ensure_schema()` on
-first connection. No external migration tool is used for the PoC.
-
-All timestamp columns are `TEXT` in ISO8601 UTC format
-(`2026-03-13T10:00:00.000000+00:00`). SQLite has no native datetime type.
-ISO8601 strings sort correctly as text and round-trip through
-`datetime.fromisoformat()` without loss.
-
-```sql
-CREATE TABLE IF NOT EXISTS messages (
-    id            INTEGER  PRIMARY KEY AUTOINCREMENT,
-    from_agent    TEXT     NOT NULL,
-    to_agent      TEXT     NOT NULL,          -- always single agent after fanout
-    subject       TEXT     NOT NULL DEFAULT '',
-    body          TEXT     NOT NULL DEFAULT '',
-    thread_id     TEXT     NOT NULL,
-    parent_id     INTEGER  REFERENCES messages(id),
-    created_at    TEXT     NOT NULL,          -- UTC ISO8601, set by caller
-    sent_at       TEXT,                       -- UTC ISO8601, set by transport.send()
-    received_at   TEXT,                       -- UTC ISO8601, set by transport.receive()
-    processed_at  TEXT                        -- UTC ISO8601, set by transport.ack()
-);
-
--- Hot path: every agent poll hits this index
-CREATE INDEX IF NOT EXISTS idx_inbox
-    ON messages(to_agent, processed_at, created_at);
-
--- Thread reconstruction for debugging and conversation history
-CREATE INDEX IF NOT EXISTS idx_thread
-    ON messages(thread_id, created_at);
-```
-
-WAL mode and synchronous=NORMAL are applied at connection time for concurrent
-read performance. Both are configured via settings.
-
-### Checkpointer Database
-
-LangGraph conversation state is persisted in a separate SQLite database:
-`data/checkpoints.db` (configurable via `CHECKPOINTER_DB_PATH`).
-
-This database is managed entirely by `AsyncSqliteSaver` from
-`langgraph-checkpoint-sqlite`. The schema is internal to LangGraph — never
-query or write to it directly. Use `checkpointer.aget()` for inspection in tests.
-
-**Why separate from `agents.db`:** The message transport database and the LangGraph
-checkpoint database have different owners, different schemas, and different lifecycle
-concerns. Mixing them would couple two independent subsystems.
-
-**Lifecycle ownership:** The CLI entry point (`cli/run.py`) owns the checkpointer.
-It is opened via `async with AsyncSqliteSaver.from_conn_string(...)` and closed
-when the process exits. `LLMAgent` receives the checkpointer as a constructor
-parameter typed as `BaseCheckpointSaver`. In unit tests, `MemorySaver()` is
-injected instead — no file I/O, no async setup.
-
----
-
-## 9. Coding Standards
-
-### General Rules
-
-- **Line length:** 100 characters (configured in ruff).
-- **Type annotations:** mandatory on all function signatures and class attributes.
-  No `Any` without a `# type: ignore[misc]` comment explaining why.
-- **No mutable default arguments.** Use `None` with `if x is None: x = []`.
-- **No bare `except:`.** Always specify the exception type.
-- **No `print()` in application code.** All output goes through `structlog`.
-- **No `os.path`.** Use `pathlib.Path` exclusively.
-- **No f-string logging.** Use structlog keyword arguments: `log.info("event", key=val)`.
-- **Imports:** standard library → third-party → local. `ruff` enforces this automatically.
-- **`from __future__ import annotations`** at the top of every source file. Enables
-  PEP 563 postponed evaluation, required for forward references in type hints.
-
-### Async Rules
-
-- All I/O-performing functions are `async def`. No blocking I/O in coroutines.
-- Use `asyncio.timeout()` (Python 3.11+) for operation timeouts, not `asyncio.wait_for`.
-- Use `async with` and `async for` where the protocol supports it.
-- CLI entry points call `asyncio.run(main())`. No `asyncio.get_event_loop()`.
-- On Windows, set the event loop policy at process startup:
-
-```python
-import asyncio
-import sys
-
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-```
-
-### Naming Conventions
-
-| Construct | Convention | Example |
+| Script | Purpose | `just` target |
 |---|---|---|
-| Module | `snake_case` | `sqlite_transport.py` |
-| Class | `PascalCase` | `SQLiteTransport` |
-| Function / method | `snake_case` | `receive_message` |
-| Constant | `UPPER_SNAKE_CASE` | `DEFAULT_POLL_INTERVAL` |
-| Private attribute | `_leading_underscore` | `_connection` |
-| Type alias | `PascalCase` | `AgentName = str` |
-| Abstract method | no prefix | `receive` (not `_receive`) |
-
-### Semantic Versioning
-
-The project follows **Semantic Versioning 2.0.0** (`MAJOR.MINOR.PATCH`).
-
-| Component | Increment when |
-|---|---|
-| `MAJOR` | Breaking change to a public interface or behaviour contract |
-| `MINOR` | New capability added in a backwards-compatible way |
-| `PATCH` | Backwards-compatible bug fix or documentation update |
-
-**Single source of truth for the version:** `pyproject.toml` `[project] version`.
-The package `__init__.py` reads it at import time using `importlib.metadata`:
-
-```python
-# src/multiagent/__init__.py
-from importlib.metadata import version, PackageNotFoundError
-
-try:
-    __version__: str = version("multiagent")
-except PackageNotFoundError:
-    # Package is not installed — running from source without `uv pip install -e .`
-    __version__ = "0.0.0+dev"
-```
-
-**Version is never hardcoded** in any file other than `pyproject.toml`.
-All other code that needs the version imports `from multiagent import __version__`.
-
-**PoC versioning convention:**
-- Start at `0.1.0` — signals unstable, under development
-- Increment `MINOR` for each significant PoC milestone
-- Move to `1.0.0` only when the architecture is considered stable
-- Pre-release labels are permitted: `0.2.0-alpha.1`, `0.2.0-beta.1`
-
-**Release commit convention:**
-```bash
-git commit -m "chore(release): bump version to 0.2.0"
-git tag -a v0.2.0 -m "Release 0.2.0 — SQLite transport complete"
-```
-
-### Constants
-
-Only true constants (values that are never configurable and never change at runtime)
-belong in `constants.py`. Examples: protocol version strings, fixed schema versions.
-All other values belong in `settings.py`.
+| `browse_threads.py` | Interactive thread browser with cost column | `just threads` |
+| `show_thread.py` | Full message chain with cost footer | `just thread <id>` |
+| `show_run.py` | Log events for one run with token/cost columns | `just run <file>` |
+| `compare_runs.py` | Side-by-side run comparison | `just compare <files>` |
+| `show_costs.py` | Cost views by experiment/agent/model | `just costs` |
 
 ---
 
-## 10. Docstring Standard
+## 15. Git Workflow
 
-**Google style** is mandatory for all public modules, classes, functions, and methods.
-`ruff` with `pydocstyle` convention `"google"` enforces this.
+### 15.1 Branching Strategy
 
-### Module Docstring
-
-```python
-"""SQLite transport adapter for the multi-agent messaging system.
-
-Implements the Transport ABC using an SQLite database as a persistent
-message store. Supports concurrent readers via WAL journal mode.
-Intended for development and PoC use — not for high-throughput production.
-"""
+```
+master          # always clean, Radek merges here
+feature/<slug>  # new capability
+fix/<slug>      # bug fix
+chore/<slug>    # tooling, config, non-functional
+docs/<slug>     # documentation only
 ```
 
-### Class Docstring
+Work is always on a feature branch. `master` is never worked on directly.
 
-```python
-class SQLiteTransport(Transport):
-    """Transport adapter backed by an SQLite database file.
-
-    Provides durable, inspectable message storage with zero infrastructure
-    requirements. Messages persist across process restarts. Multiple agents
-    may share one database file safely via WAL mode concurrency.
-
-    Attributes:
-        db_path: Resolved path to the SQLite database file.
-        poll_interval: Seconds between mailbox checks when idle.
-    """
-```
-
-### Function / Method Docstring
-
-```python
-async def receive(self, agent_name: str) -> Message | None:
-    """Fetch the next unprocessed message addressed to the given agent.
-
-    Performs a single non-blocking query. Returns immediately whether or not
-    a message is available. The caller is responsible for polling.
-
-    Args:
-        agent_name: The name of the agent whose mailbox to query.
-            Must match the to_agent field of stored messages exactly.
-
-    Returns:
-        The oldest unprocessed Message for agent_name, or None if the
-        mailbox is empty.
-
-    Raises:
-        MessageReceiveError: If the database query fails.
-
-    Example:
-        >>> transport = SQLiteTransport(Path("agents.db"))
-        >>> msg = await transport.receive("researcher")
-        >>> if msg:
-        ...     print(msg.body)
-    """
-```
-
-### Inline Comments
-
-Use inline comments sparingly — only to explain **why**, never **what**. The code
-explains what; the docstring explains the contract; comments explain non-obvious intent.
-
-```python
-# WAL mode allows concurrent readers while a writer holds a lock.
-# Without this, multiple agents reading the same DB cause lock contention.
-await conn.execute("PRAGMA journal_mode=WAL;")
-```
-
----
-
-## 11. Testing Strategy
-
-### Two-Tier Model
-
-**Tier 1 — Unit tests** (`tests/unit/`)
-- Run on every commit and in CI.
-- LLM API calls are mocked. No network I/O.
-- SQLite tests use `:memory:` databases.
-- Coverage target: **80% minimum** on `src/multiagent/` excluding `cli/`.
-- TDD is the preferred development approach: write the test first, run it (red),
-  implement (green), refactor (clean).
-
-**Tier 2 — Integration tests** (`tests/integration/`)
-- Run explicitly: `just test-integration`.
-- Make real LLM API calls. Require `ANTHROPIC_API_KEY` in environment.
-- Assert structure and type of responses, never exact content (LLMs are non-deterministic).
-- Cover key happy-path pipelines only — not exhaustive scenarios.
-- Gated by `@pytest.mark.integration` marker. Excluded from default `pytest` run.
-
-### Shared Fixtures — conftest.py
-
-```python
-# tests/conftest.py
-import pytest
-from unittest.mock import AsyncMock
-
-from multiagent.transport.base import Message
-
-
-@pytest.fixture
-def mock_llm_response():
-    """Factory fixture returning a callable that produces mock LLM text."""
-    def factory(text: str = "mocked llm response") -> AsyncMock:
-        mock = AsyncMock()
-        mock.return_value.content = text
-        return mock
-    return factory
-
-
-@pytest.fixture
-def sample_message() -> Message:
-    """A valid Message instance for use in transport and runner tests."""
-    return Message(
-        from_agent="human",
-        to_agent="researcher",
-        body="Research the history of the internet.",
-        subject="research-task",
-        thread_id="test-thread-001",
-    )
-```
-
-### Unit Test Pattern
-
-```python
-# tests/unit/core/test_agent.py
-import pytest
-from unittest.mock import AsyncMock, patch
-
-from multiagent.core.agent import LLMAgent
-
-
-async def test_agent_returns_llm_response(mock_llm_response):
-    """Agent.run() returns the text from the LLM response."""
-    mock = mock_llm_response("The internet began in 1969 with ARPANET.")
-
-    with patch("multiagent.core.agent.ChatAnthropic", return_value=mock):
-        agent = LLMAgent(name="researcher", system_prompt="You are a researcher.")
-        result = await agent.run("Research the history of the internet.")
-
-    assert result == "The internet began in 1969 with ARPANET."
-
-
-async def test_agent_passes_system_prompt_to_llm(mock_llm_response):
-    """Agent.run() includes the system prompt in every LLM invocation."""
-    mock = mock_llm_response()
-    system_prompt = "You are a specialized research agent."
-
-    with patch("multiagent.core.agent.ChatAnthropic", return_value=mock) as llm_cls:
-        agent = LLMAgent(name="researcher", system_prompt=system_prompt)
-        await agent.run("test input")
-
-    call_args = llm_cls.return_value.call_args
-    assert system_prompt in str(call_args)
-```
-
-### Integration Test Pattern
-
-```python
-# tests/integration/test_agent_pipeline.py
-import pytest
-
-from multiagent.core.agent import LLMAgent
-
-
-@pytest.mark.integration
-async def test_researcher_agent_returns_text():
-    """Researcher agent produces a non-empty text response from the real LLM."""
-    agent = LLMAgent(
-        name="researcher",
-        system_prompt="You are a researcher. Be concise. One sentence maximum.",
-    )
-    result = await agent.run("What is TCP/IP? One sentence.")
-
-    assert isinstance(result, str)
-    assert len(result) > 10
-    # Never assert exact content — LLMs are non-deterministic
-```
-
-### Running Tests
+### 15.2 Branch Lifecycle
 
 ```bash
-just test              # unit tests only (default, fast, no LLM)
-just test-coverage     # unit tests with coverage report
-just test-integration  # integration tests (requires ANTHROPIC_API_KEY)
-just test-all          # all tests
-```
+# Start
+git checkout master && git pull origin master
+git checkout -b feature/<slug>
 
----
+# During — commit often with Conventional Commits
+# stage intentionally — never git add -A blindly
 
-## 12. Git Workflow
-
-### Repository State
-
-The repository is initialised, has a remote, and `master` is the stable integration
-branch. All work happens in feature branches. No commits directly to `master`.
-
-```bash
-# Verify remote and branch state before starting any task
-git remote -v
-git branch -a
-git worktree list
-```
-
-### Branching Convention
-
-```
-master                  — stable, always passing, protected
-feature/<short-name>    — new functionality
-fix/<short-name>        — bug fixes
-docs/<short-name>       — documentation only changes
-chore/<short-name>      — tooling, dependencies, config
-adr/<record-number>     — architecture decision records
-```
-
-**Note:** This project uses `master` as the integration branch, not `main`.
-This is the established convention for this repository and must not be changed.
-
-### Starting a New Task — Standard Sequence
-
-Every task follows this sequence before writing a single line of code:
-
-```bash
-# 1. Ensure master is up to date with remote
+# Finish — Tom reports, Radek merges
 git checkout master
-git pull origin master
-
-# 2. Create worktree for the new task branch
-git worktree add ../multiagent-<slug> feature/<slug>
-
-# 3. Confirm state
-git worktree list
-```
-
-### Completing a Task — Standard Sequence
-
-```bash
-# 1. Ensure all acceptance criteria pass in the worktree
-cd ../multiagent-<slug>
-just check && just test
-
-# 2. Push branch to remote
-git push origin feature/<slug>
-
-# 3. Merge to master locally
-git checkout master
-git merge feature/<slug> --ff-only
-
-# 4. Push master to remote
+git merge feature/<slug>
 git push origin master
-
-# 5. Remove worktree
-git worktree remove ../multiagent-<slug>
-
-# 6. Delete merged branch
 git branch -d feature/<slug>
 ```
 
-`--ff-only` is mandatory on merge. If the merge cannot fast-forward, the branch
-has diverged from master and must be rebased before merging.
+**Radek is the only person who merges to master. Tom pushes his branch
+and reports completion.**
 
-### Git Worktrees — Parallel Development
-
-Worktrees allow multiple branches to be checked out simultaneously in separate
-directories without stashing or switching. Use for parallel workstreams:
-
-```bash
-# From the repository root
-git worktree add ../multiagent-transport feature/transport
-git worktree add ../multiagent-core feature/agent-core
-
-# Each directory is an independent working tree on its branch
-cd ../multiagent-transport
-# ... work on transport ...
-
-cd ../multiagent-core
-# ... work on agent core simultaneously ...
-
-# List active worktrees
-git worktree list
-
-# Clean up when branch is merged
-git worktree remove ../multiagent-transport
-```
-
-### Commit Message Convention
-
-[Conventional Commits](https://www.conventionalcommits.org/) format is required:
+### 15.3 Commit Convention
 
 ```
-<type>(<scope>): <subject>
+<type>(<scope>): <short summary>
 
-<body — optional, explains why not what>
-
-<footer — references issues, breaking changes>
-```
-
-Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`
+Types: feat, fix, docs, chore, refactor, test, ci
+Scope: core, transport, config, logging, cli, tests (optional)
 
 Examples:
-
+feat(transport): implement SQLiteTransport with WAL mode
+fix(core): handle empty LLM response in AgentRunner
+test(core): add unit tests for LLMAgent cost recording
 ```
-feat(transport): implement SQLite receive with WAL mode
 
-fix(runner): handle empty message body without raising AgentError
+### 15.4 Pre-Branch Hygiene
 
-docs(adr): add ADR-0004 for SQLite transport selection
+Before starting any task: `git status` — master must be clean. If uncommitted
+changes exist, stage intentionally and commit before branching. Never start a
+feature branch from a dirty master.
 
-chore(deps): bump langgraph to 0.2.1
-```
+### 15.5 Plan Files
+
+Implementation plans live in `tasks/plans/<task-id>-plan.md`. Committed to the
+feature branch. Updated to reflect architect feedback before implementation begins.
+The plan should represent what was actually built, not the original draft.
 
 ---
 
-## 13. Task Runner
+## 16. Task Runner Reference
 
-All runnable operations are defined in `justfile`. `just` must be installed separately
-and is available cross-platform. See https://github.com/casey/just.
+All development tasks run via `just`. Run `just` with no arguments to list targets.
 
-```makefile
-# justfile
+### Application
 
-# Default: list available tasks
-default:
-    @just --list
-
-# ── Setup ──────────────────────────────────────────────────────────────────
-
-# Install all dependencies and pre-commit hooks
-setup:
-    uv sync --all-extras
-    uv run pre-commit install
-    @echo "Setup complete. Copy .env.defaults to .env and set ANTHROPIC_API_KEY."
-
-# ── Code Quality ───────────────────────────────────────────────────────────
-
-# Format and lint with ruff
-lint:
-    uv run ruff check src tests --fix
-    uv run ruff format src tests
-
-# Type check with pyright
-typecheck:
-    uv run pyright src tests
-
-# Run all quality checks (no fixes applied)
-check:
-    uv run ruff check src tests
-    uv run ruff format src tests --check
-    uv run pyright src tests
-
-# ── Testing ────────────────────────────────────────────────────────────────
-
-# Run unit tests (default — no LLM calls)
-test:
-    uv run pytest tests/unit
-
-# Run unit tests with coverage report
-test-coverage:
-    uv run pytest tests/unit --cov=src/multiagent --cov-report=term-missing --cov-report=html
-
-# Run integration tests (requires ANTHROPIC_API_KEY)
-test-integration:
-    uv run pytest tests/integration -m integration -v
-
-# Run all tests
-test-all:
-    uv run pytest tests -m "" -v
-
-# ── Application ────────────────────────────────────────────────────────────
-
-# Run a named agent (polls for messages until interrupted)
-run agent experiment="":
-    uv run multiagent run {{agent}} {{if experiment != "" { "--experiment " + experiment } else { "" }}}
-
-# Inject a message into the transport for a named agent
-send agent body:
-    uv run multiagent send {{agent}} "{{body}}"
-
-# ── Database ───────────────────────────────────────────────────────────────
-
-# Show last N messages across all agents
-db-tail n="20":
-    sqlite3 data/agents.db "SELECT id, from_agent, to_agent, substr(body,1,60) as body, processed_at FROM messages ORDER BY created_at DESC LIMIT {{n}};"
-
-# Show all pending (unprocessed) messages by agent
-db-pending:
-    sqlite3 data/agents.db "SELECT to_agent, count(*) as pending FROM messages WHERE processed_at IS NULL GROUP BY to_agent;"
-
-# Show per-agent message counts and last activity
-db-agents:
-    sqlite3 data/agents.db "SELECT to_agent, count(*) as total, sum(processed_at IS NOT NULL) as done, max(created_at) as last_seen FROM messages GROUP BY to_agent;"
-
-# Clear all messages from the transport database
-db-clear:
-    sqlite3 data/agents.db "DELETE FROM messages;"
-
-# ── Inspection scripts ─────────────────────────────────────────────────────
-
-# Show a conversation thread from SQLite, formatted with rich
-thread thread_id:
-    uv run python scripts/show_thread.py {{thread_id}}
-
-# Show a summary of a single run log file
-run-summary log_file:
-    uv run python scripts/show_run.py {{log_file}}
-
-# Compare two run log files side by side
-compare log1 log2:
-    uv run python scripts/compare_runs.py {{log1}} {{log2}}
-
-# List all run log files with metadata
-runs:
-    @ls -lt logs/*.jsonl 2>/dev/null || echo "No run logs found in logs/"
-
-# ── Documentation ──────────────────────────────────────────────────────────
-
-# List all Architecture Decision Records
-adr-list:
-    @ls docs/adr/
-
-# ── Maintenance ────────────────────────────────────────────────────────────
-
-# Update all dependencies to latest compatible versions
-update:
-    uv sync --upgrade
-
-# Remove all generated artifacts
-clean:
-    rm -rf .venv .ruff_cache .pytest_cache htmlcov .coverage
-    find . -type d -name __pycache__ -exec rm -rf {} +
-```
-
----
-
-## 14. Documentation Standards
-
-### docs/ Folder Structure
-
-```
-docs/
-├── adr/                     # Architecture Decision Records
-│   └── NNNN-title.md        # zero-padded 4-digit sequence
-├── architecture.md          # system overview, diagrams, module map
-├── getting-started.md       # clone → setup → first run, 5 minutes
-└── transport-guide.md       # how to implement a new Transport adapter
-```
-
-### Task Briefs — `tasks/`
-
-Task briefs are implementation instructions authored by the architect and consumed by
-Claude Code. They are distinct from documentation: they are work instructions, not
-reference material.
-
-```
-tasks/
-├── README.md                # task lifecycle and conventions
-├── 001-skeleton.md          # complete, permanent record
-├── 002-transport-sqlite.md  # in progress
-└── 003-agent-core.md        # planned
-```
-
-**Naming:** zero-padded three-digit sequence number followed by a short slug.
-`001-skeleton.md`, `002-transport-sqlite.md`.
-
-**Lifecycle states** (recorded in the file header):
-
-| State | Meaning |
+| Target | Purpose |
 |---|---|
-| `DRAFT` | Being authored by architect, not yet handed to Claude Code |
-| `APPROVED` | Architect sign-off complete, ready for Claude Code planning phase |
-| `IN PROGRESS` | Claude Code is implementing |
-| `COMPLETE` | Implementation merged, acceptance criteria met |
+| `just run <agent>` | Run a single agent |
+| `just send <agent> "<message>"` | Send a message to an agent |
+| `just start [experiment]` | Start all agents from agents.toml |
+| `just stop` | Write stop file to halt the cluster |
+| `just listen [thread_id]` | Poll for messages addressed to human |
+| `just chat <agent> [thread_id]` | Interactive REPL with an agent |
 
-**Tasks are never deleted.** Completed tasks are permanent record of what was built,
-in what order, and under what constraints. They are the implementation audit trail.
+### Inspection
 
-**`tasks/README.md` content:**
-
-```markdown
-# Tasks
-
-Each file is a Claude Code implementation brief authored by the architect.
-
-## Workflow
-
-1. Architect drafts brief in Claude.ai (DRAFT)
-2. Architect reviews and approves (APPROVED)
-3. Claude Code reads brief, produces plan, plan is reviewed by architect
-4. Claude Code implements against approved plan (IN PROGRESS)
-5. Acceptance criteria verified, branch merged (COMPLETE)
-
-## Naming Convention
-
-NNN-short-slug.md — three-digit zero-padded sequence, hyphenated slug.
-Example: 001-skeleton.md, 002-transport-sqlite.md
-
-## Completed Tasks
-
-Completed tasks are kept permanently as an implementation audit trail.
-Do not delete or modify completed task files.
-```
-
-### Architecture Decision Records
-
-One ADR per significant decision. An ADR is **never deleted** — superseded ADRs are
-marked as such and link to their replacement. Template:
-
-```markdown
-# ADR-NNNN: Title
-
-**Date:** YYYY-MM-DD
-**Status:** Proposed | Accepted | Superseded by ADR-XXXX
-**Deciders:** Radek Zítek
-
-## Context
-
-What is the situation that forces a decision? What constraints exist?
-
-## Decision
-
-What was decided, stated plainly.
-
-## Rationale
-
-Why this option over the alternatives considered.
-
-## Alternatives Considered
-
-- **Alternative A** — why rejected
-- **Alternative B** — why rejected
-
-## Consequences
-
-What becomes easier, harder, or different as a result of this decision.
-```
-
-Initial ADRs to create at project inception:
-
-- `0001-python-312.md` — Python version pin
-- `0002-uv-package-manager.md` — uv over poetry/pip
-- `0003-async-first.md` — async throughout the codebase
-- `0004-sqlite-transport-poc.md` — SQLite as PoC message bus
-- `0005-langgraph-agent-internals.md` — LangGraph for agent graphs
-
-### README.md Minimum Content
-
-- Project purpose (two sentences)
-- Prerequisites (Python 3.12, uv, just)
-- Setup: `just setup`
-- First run: `just run`
-- Running tests: `just test`
-- Link to `docs/architecture.md`
-- Link to `docs/getting-started.md`
-
----
-
-## 15. Cross-Platform Rules
-
-The system must run identically on Windows, Linux, and macOS without platform-specific
-code paths in the application layer. Differences are handled at the infrastructure level.
-
-### Mandatory Practices
-
-**Paths — always `pathlib.Path`:**
-
-```python
-# Never
-path = "data/agents.db"
-path = os.path.join("data", "agents.db")
-
-# Always
-from pathlib import Path
-path = Path("data") / "agents.db"
-```
-
-**Line endings — never hardcode:**
-
-```python
-# Never
-text.split("\n")
-text + "\n"
-
-# Always
-text.splitlines()
-text + os.linesep   # or let the file open mode handle it
-```
-
-**Windows asyncio event loop — set at entry point:**
-
-```python
-# src/multiagent/cli/run.py
-import asyncio
-import sys
-
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-asyncio.run(main())
-```
-
-**SQLite on Windows — use WAL mode:**
-SQLite default journal mode has file locking issues on Windows with multiple readers.
-WAL mode resolves this. `SQLITE_WAL_MODE=true` is the default in `.env.defaults`.
-
-**Shell commands in justfile — cross-platform safe:**
-`just` uses `sh` on Unix and `cmd` on Windows by default. Avoid shell-specific syntax.
-For any task requiring shell features, use a Python script instead of inline shell.
-
-**File encoding — always explicit:**
-
-```python
-# Never
-open("file.txt", "r")
-
-# Always
-open("file.txt", "r", encoding="utf-8")
-```
-
----
-
-## 16. Dependency Reference
-
-### Runtime Dependencies
-
-| Package | Purpose | Import As |
-|---|---|---|
-| `langgraph` | Agent graph orchestration | `from langgraph.graph import StateGraph` |
-| `langchain-openai` | OpenAI-compatible LLM client for LangGraph | `from langchain_openai import ChatOpenAI` |
-| `openai` | Underlying SDK used by langchain-openai | transitive — do not import directly |
-| `pydantic-settings` | Configuration with validation | `from pydantic_settings import BaseSettings` |
-| `structlog` | Structured logging | `import structlog` |
-| `aiosqlite` | Async SQLite access | `import aiosqlite` |
-| `typer` | Type-annotated CLI framework | `import typer` |
-| `click` | CLI primitives underlying typer | transitive — do not import directly |
-
-### Development Dependencies
-
-| Package | Purpose | Used Via |
-|---|---|---|
-| `ruff` | Lint and format | `just lint`, pre-commit |
-| `pyright` | Static type checking | `just typecheck`, pre-commit |
-| `pytest` | Test runner | `just test` |
-| `pytest-asyncio` | Async test support | `asyncio_mode = "auto"` in config |
-| `pytest-mock` | Mock and spy fixtures | `mocker` fixture |
-| `respx` | Mock httpx HTTP calls | `respx.mock` context manager |
-| `pre-commit` | Git hook runner | `just setup` |
-| `rich` | Terminal formatting for inspection scripts | `scripts/` only — never imported in `src/` |
-
-### Explicitly Excluded
-
-The following packages are **not used** in this project. If a dependency pulls them in
-transitively that is acceptable, but they must not be imported directly in application code:
-
-| Package | Reason Excluded |
+| Target | Purpose |
 |---|---|
-| `python-dotenv` | Superseded by `pydantic-settings` |
-| `black` | Superseded by `ruff format` |
-| `flake8` | Superseded by `ruff` |
-| `isort` | Superseded by `ruff` |
-| `logging` (stdlib direct use) | Superseded by `structlog` |
-| `os.path` | Superseded by `pathlib.Path` |
+| `just threads` | Browse all threads interactively |
+| `just thread <id>` | Show full message chain for a thread |
+| `just runs` | List recent run log files |
+| `just costs` | Cost summary by experiment |
+| `just costs-by-agent` | Cost breakdown by agent |
+| `just costs-by-model` | Cost breakdown by model |
+
+### Development
+
+| Target | Purpose |
+|---|---|
+| `just check` | ruff lint + pyright — both must pass |
+| `just test` | Run unit tests |
+| `just test-integration` | Run integration tests |
+| `just format` | Auto-format with ruff |
+| `just clean` | Remove build artefacts and caches |
+
+### The Gate
+
+```bash
+just check && just test
+```
+
+Both must pass with zero errors before any task is considered done.
 
 ---
 
-*End of Implementation Guide v1.0.0*
+## 17. Dependency Reference
 
-*This document is the authoritative reference for all implementation decisions.
-Claude Code reads this document before writing any code and adheres to all rules herein.
-Changes to this document require architect review and an updated ADR if the change
-affects a previously recorded decision.*
+| Package | Runtime/Dev | Purpose |
+|---|---|---|
+| `langgraph` | Runtime | Agent graph, typed state, async-native |
+| `langgraph-checkpoint-sqlite` | Runtime | SQLite LangGraph checkpointer |
+| `langchain-openai` | Runtime | `ChatOpenAI` for OpenRouter integration |
+| `langchain-core` | Runtime | `BaseMessage`, `SystemMessage`, `HumanMessage` |
+| `pydantic` | Runtime | Data validation |
+| `pydantic-settings` | Runtime | Layered configuration, env file support |
+| `structlog` | Runtime | Structured logging, context binding |
+| `aiosqlite` | Runtime | Async SQLite for cost ledger |
+| `typer` | Runtime | CLI framework |
+| `rich` | Runtime | Terminal formatting for CLI and scripts |
+| `tomllib` | Runtime | `agents.toml` parsing (stdlib in 3.12) |
+| `pytest` | Dev | Test framework |
+| `pytest-asyncio` | Dev | Async test support |
+| `pytest-mock` | Dev | `mocker` fixture |
+| `pytest-cov` | Dev | Coverage reporting |
+| `ruff` | Dev | Linter and formatter |
+| `pyright` | Dev | Type checker, strict mode |
+| `pre-commit` | Dev | Git hook management |
+
+### Key Conventions
+
+- `langchain-openai` is used, not `langchain-anthropic`. The provider is OpenRouter.
+  The model string is passed as a parameter to `ChatOpenAI`.
+- `aiosqlite` is used directly by `CostLedger` only. All other SQLite access
+  goes through their respective libraries (`langgraph-checkpoint-sqlite`, the
+  transport's own connection management).
+- `rich` is a runtime dependency. It is used in `cli/` and `scripts/`. It must
+  never be imported in `core/` or `transport/`.
+- `tomllib` is stdlib in Python 3.12. No third-party TOML library is needed.
+
+---
+
+*This document is the canonical implementation reference. Tom reads it before every
+task. Deviations from these principles require explicit architectural approval and
+a note in the task plan. When in doubt, consult the architect.*
