@@ -1,13 +1,25 @@
-[agents.editor]
-router = "editorial_gate"       # dynamic routing — keyword match on output
+# Investment Research Desk
+# Supervisor orchestrates three specialists
+# All specialists route back to supervisor
+# Supervisor routes to human when memo is ready
 
-[agents.writer]
-next_agent = "linguist"
+[agents.supervisor]
+router = "research_supervisor"
 
-[agents.linguist]
-next_agent = "human"            # finished article goes back to human
+[agents.fundamentals]
+next_agent = "supervisor"
 
-[routers.editorial_gate]
-type = "keyword"
-routes.writer = ["WRITER BRIEF", "END BRIEF"]
+[agents.risk]
+next_agent = "supervisor"
+
+[agents.synthesis]
+next_agent = "supervisor"
+
+[routers.research_supervisor]
+type = "llm"
+prompt = "prompts/routers/research_supervisor.md"
+routes.fundamentals = "fundamentals"
+routes.risk = "risk"
+routes.synthesis = "synthesis"
+routes.human = "human"
 default = "human"
