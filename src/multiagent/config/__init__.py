@@ -12,13 +12,17 @@ from multiagent.config.agents import (
     RouterConfig,
     load_agents_config,
 )
+from multiagent.config.mcp import MCPConfig, MCPServerConfig, load_mcp_config
 from multiagent.config.settings import Settings, load_settings
 
 __all__ = [
     "AgentConfig",
     "AgentsConfig",
+    "MCPConfig",
+    "MCPServerConfig",
     "RouterConfig",
     "Settings",
     "load_agents_config",
+    "load_mcp_config",
     "load_settings",
 ]
