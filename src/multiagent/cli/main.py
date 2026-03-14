@@ -15,6 +15,8 @@ import typer
 from multiagent.cli.run import run_command
 from multiagent.cli.send import send_command
 from multiagent.cli.start import start_command
+from multiagent.cli.stop import stop_command
+from multiagent.cli.version import version_command
 
 app = typer.Typer(
     name="multiagent",
@@ -26,6 +28,8 @@ app = typer.Typer(
 app.command(name="run")(run_command)
 app.command(name="send")(send_command)
 app.command(name="start")(start_command)
+app.command(name="stop")(stop_command)
+app.command(name="version")(version_command)
 
 
 def main() -> None:

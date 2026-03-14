@@ -49,6 +49,49 @@ send agent body:
 start experiment="":
     uv run multiagent start {{if experiment != "" { "--experiment " + experiment } else { "" }}}
 
+# Request graceful shutdown of running agents (all or by name)
+stop agent="":
+    uv run multiagent stop {{agent}}
+
+# ── Release ────────────────────────────────────────────────────────────────
+
+# Show the current package version
+version:
+    uv run multiagent version
+
+# Bump the patch version in pyproject.toml
+bump-patch:
+    uv run python -c "from multiagent.version import bump_in_pyproject; print(f'Bumped to {bump_in_pyproject(\"patch\")}')"
+
+# Bump the minor version in pyproject.toml
+bump-minor:
+    uv run python -c "from multiagent.version import bump_in_pyproject; print(f'Bumped to {bump_in_pyproject(\"minor\")}')"
+
+# Bump the major version in pyproject.toml
+bump-major:
+    uv run python -c "from multiagent.version import bump_in_pyproject; print(f'Bumped to {bump_in_pyproject(\"major\")}')"
+
+# Run full release: check, test, bump, commit, and tag
+release part="minor" description="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # 1. Clean working tree
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Error: working tree not clean"; exit 1
+    fi
+    # 2. Quality gates
+    just check && just test
+    # 3. Bump
+    just bump-{{part}}
+    # 4. Commit + tag
+    NEW_VERSION=$(uv run multiagent version)
+    git add pyproject.toml
+    git commit -m "chore(release): bump version to ${NEW_VERSION}"
+    TAG_MSG="Release ${NEW_VERSION}"
+    [ -n "{{description}}" ] && TAG_MSG="Release ${NEW_VERSION} — {{description}}"
+    git tag -a "v${NEW_VERSION}" -m "${TAG_MSG}"
+    echo "Released v${NEW_VERSION}"
+
 # ── Database ───────────────────────────────────────────────────────────────
 
 # Show last N messages across all agents (default 20)
