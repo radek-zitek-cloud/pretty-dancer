@@ -279,6 +279,12 @@ class LLMAgent:
         )
         content = result["messages"][-1].content
         response = content if isinstance(content, str) else str(content)
+        if not response:
+            self._log.warning(
+                "empty_llm_response",
+                thread_id=thread_id,
+                message_count=len(result["messages"]),
+            )
         next_agent: str | None = result.get("next_agent")
         return RunResult(response=response, next_agent=next_agent)
 
