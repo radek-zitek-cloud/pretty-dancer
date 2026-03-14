@@ -12,7 +12,7 @@ from multiagent.transport.base import Message
 
 if TYPE_CHECKING:
     from multiagent.config.settings import Settings
-    from multiagent.core.agent import LLMAgent
+    from multiagent.core.agent import LLMAgent, RunResult
     from multiagent.core.shutdown import ShutdownMonitor
     from multiagent.transport.base import Transport
 
@@ -76,10 +76,10 @@ class AgentRunner:
         op_log = self._log.bind(message_id=msg.id, thread_id=msg.thread_id)
 
         # Retry loop for LLM call
-        response_text: str | None = None
+        run_result: RunResult | None = None
         for attempt in range(1, self._max_retries + 2):  # +2: retries + initial attempt
             try:
-                response_text = await self._agent.run(msg.body, msg.thread_id)
+                run_result = await self._agent.run(msg.body, msg.thread_id)
                 break
             except AgentLLMError:
                 if attempt <= self._max_retries:
@@ -95,22 +95,24 @@ class AgentRunner:
                     self._log.error("llm_retries_exhausted", attempts=attempt)
                     raise
 
-        assert response_text is not None  # guaranteed by break above
+        assert run_result is not None  # guaranteed by break above
 
         assert msg.id is not None  # set by transport on receive
         await self._transport.ack(msg.id)
         op_log.info("message_processed")
 
-        if self._next_agent:
+        # Dynamic routing takes priority over static next_agent
+        effective_next = run_result.next_agent or self._next_agent
+        if effective_next:
             await self._transport.send(Message(
                 from_agent=self._agent.name,
-                to_agent=self._next_agent,
-                body=response_text,
+                to_agent=effective_next,
+                body=run_result.response,
                 subject=msg.subject,
                 thread_id=msg.thread_id,
                 parent_id=msg.id,
             ))
-            op_log.info("message_forwarded", to_agent=self._next_agent)
+            op_log.info("message_forwarded", to_agent=effective_next)
 
         return True
 

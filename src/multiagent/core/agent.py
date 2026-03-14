@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -16,15 +17,40 @@ from langgraph.graph.state import CompiledStateGraph
 
 from multiagent.config.settings import Settings
 from multiagent.core.costs import CostEntry, CostLedger
+from multiagent.core.routing import KeywordRouter, LLMRouter
 from multiagent.exceptions import AgentConfigurationError, AgentLLMError
+
+
+class AgentState(MessagesState):
+    """Extended graph state with routing decision.
+
+    Inherits messages list from MessagesState and adds next_agent
+    for dynamic routing. When no router is present, next_agent
+    remains None.
+    """
+
+    next_agent: str | None
+
+
+class RunResult(NamedTuple):
+    """Result of an agent run — response text and optional routing decision.
+
+    Attributes:
+        response: The LLM's response as a plain string.
+        next_agent: Destination agent from dynamic routing, or None
+            if no router is configured or routing did not run.
+    """
+
+    response: str
+    next_agent: str | None = None
 
 
 class LLMAgent:
     """LLM-powered agent, transport-agnostic.
 
-    Wraps a single LangGraph graph with one LLM node. The public interface
-    is exactly one method: ``run(input_text, thread_id) -> str``. No I/O,
-    no transport, no side effects beyond the LLM call.
+    Wraps a single LangGraph graph with one LLM node and an optional
+    routing node. The public interface is ``run(input_text, thread_id)``
+    which returns a RunResult containing the response and routing decision.
     """
 
     def __init__(  # type: ignore[type-arg]
@@ -33,11 +59,13 @@ class LLMAgent:
         settings: Settings,
         checkpointer: BaseCheckpointSaver,
         cost_ledger: CostLedger,
+        router: KeywordRouter | LLMRouter | None = None,
     ) -> None:
         """Initialise the agent with a name, settings, checkpointer, and cost ledger."""
         self.name = name
         self._settings = settings
         self._cost_ledger = cost_ledger
+        self._router = router
         self._log = structlog.get_logger().bind(agent=name)
         self._system_prompt = self._load_prompt(name, settings.prompts_dir)
         self._checkpointer = checkpointer
@@ -85,18 +113,22 @@ class LLMAgent:
             ) from exc
 
     def _build_graph(self) -> CompiledStateGraph:  # type: ignore[type-arg]
-        """Build the LangGraph processing graph with MessagesState.
+        """Build the LangGraph processing graph with AgentState.
 
-        Uses MessagesState, which maintains a list of BaseMessage objects
-        that accumulates across invocations via the checkpointer. The LLM
-        receives the full message history on every call, enabling genuine
-        multi-turn conversation.
+        Uses AgentState (extending MessagesState) which maintains a list
+        of BaseMessage objects that accumulates across invocations via the
+        checkpointer. When a router is configured, a routing node is added
+        after the LLM node to determine the next destination.
+
+        Graph structure:
+            Without router: llm → END
+            With router:    llm → route → END
 
         Returns:
             Compiled graph with checkpointer attached.
         """
 
-        async def call_llm(state: MessagesState, config: RunnableConfig) -> MessagesState:  # type: ignore[return-type]
+        async def call_llm(state: AgentState, config: RunnableConfig) -> AgentState:  # type: ignore[return-type]
             self._log.debug("llm_call_start", history_length=len(state["messages"]))
             response = await self._llm.ainvoke([
                 SystemMessage(content=self._system_prompt),
@@ -166,13 +198,32 @@ class LLMAgent:
 
             return {"messages": [response]}  # type: ignore[return-value]
 
-        graph: StateGraph = StateGraph(MessagesState)  # type: ignore[type-arg]
+        graph: StateGraph = StateGraph(AgentState)  # type: ignore[type-arg]
         graph.add_node("llm", call_llm)
         graph.set_entry_point("llm")
-        graph.add_edge("llm", END)
+
+        if self._router is not None:
+            router = self._router
+
+            async def route_node(state: AgentState) -> AgentState:  # type: ignore[return-type]
+                content = state["messages"][-1].content
+                output = content if isinstance(content, str) else str(content)
+                if isinstance(router, KeywordRouter):
+                    destination = router.route(output)
+                else:
+                    destination = await router.route(output)
+                self._log.info("routing_decision", destination=destination)
+                return {"next_agent": destination}  # type: ignore[return-value]
+
+            graph.add_node("route", route_node)
+            graph.add_edge("llm", "route")
+            graph.add_edge("route", END)
+        else:
+            graph.add_edge("llm", END)
+
         return graph.compile(checkpointer=self._checkpointer)
 
-    async def run(self, input_text: str, thread_id: str) -> str:
+    async def run(self, input_text: str, thread_id: str) -> RunResult:
         """Process input_text with full conversation history for the thread.
 
         The checkpointer restores prior messages for this thread_id before
@@ -185,7 +236,7 @@ class LLMAgent:
             thread_id: Conversation thread identifier.
 
         Returns:
-            The LLM's response as a plain string.
+            RunResult with the LLM response and optional routing decision.
 
         Raises:
             AgentLLMError: If the LLM API call fails.
@@ -196,7 +247,10 @@ class LLMAgent:
                 {"messages": [HumanMessage(content=input_text)]},
                 config=config,
             )
-            return str(result["messages"][-1].content)
+            content = result["messages"][-1].content
+            response = content if isinstance(content, str) else str(content)
+            next_agent: str | None = result.get("next_agent")
+            return RunResult(response=response, next_agent=next_agent)
         except Exception as exc:
             self._log.error("llm_call_failed", error=str(exc), thread_id=thread_id)
             raise AgentLLMError(

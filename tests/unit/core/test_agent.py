@@ -6,8 +6,10 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 from pytest_mock import MockerFixture
 
+from multiagent.config.agents import RouterConfig
 from multiagent.config.settings import Settings
-from multiagent.core.agent import LLMAgent
+from multiagent.core.agent import LLMAgent, RunResult
+from multiagent.core.routing import KeywordRouter
 from multiagent.exceptions import AgentConfigurationError, AgentLLMError
 
 
@@ -43,14 +45,16 @@ class TestLLMAgentInit:
 
 
 class TestLLMAgentRun:
-    async def test_returns_llm_response_string(
+    async def test_returns_run_result(
         self, test_settings: Settings, mock_llm: AsyncMock,
         mock_llm_response: str, checkpointer: MemorySaver,
         mock_cost_ledger: AsyncMock,
     ) -> None:
         agent = LLMAgent("researcher", test_settings, checkpointer, mock_cost_ledger)
         result = await agent.run("test input", "thread-1")
-        assert result == mock_llm_response
+        assert isinstance(result, RunResult)
+        assert result.response == mock_llm_response
+        assert result.next_agent is None
 
     async def test_calls_llm_exactly_once_per_run(
         self, test_settings: Settings, mock_llm: AsyncMock, checkpointer: MemorySaver,
@@ -96,7 +100,7 @@ class TestLLMAgentRun:
         agent = LLMAgent("researcher", test_settings, checkpointer, mock_cost_ledger)
         result1 = await agent.run("first input", "thread-1")
         result2 = await agent.run("second input", "thread-2")
-        assert result1 == result2
+        assert result1.response == result2.response
         assert mock_llm.call_count == 2
 
 
@@ -212,7 +216,7 @@ class TestLLMAgentCostTracking:
         agent = LLMAgent("researcher", test_settings, checkpointer, mock_cost_ledger)
         # Should complete normally despite record failure
         result = await agent.run("test input", "thread-1")
-        assert result == "Mocked LLM response for testing."
+        assert result.response == "Mocked LLM response for testing."
 
     async def test_zero_cost_when_pricing_absent(
         self, test_settings: Settings, mocker: MockerFixture, checkpointer: MemorySaver,
@@ -240,3 +244,71 @@ class TestLLMAgentCostTracking:
         assert entry.cost_usd == 0.0
         assert entry.input_unit_price == 0.0
         assert entry.output_unit_price == 0.0
+
+
+class TestLLMAgentRouting:
+    async def test_keyword_router_determines_next_agent(
+        self, test_settings: Settings, mock_llm: AsyncMock, checkpointer: MemorySaver,
+        mock_cost_ledger: AsyncMock,
+        mock_llm_response: str,
+        mocker: MockerFixture,
+    ) -> None:
+        """When a keyword router is configured and output matches a trigger,
+        RunResult.next_agent is set to the matching destination."""
+        from langchain_core.messages import AIMessage
+
+        mock_response = AsyncMock(
+            return_value=AIMessage(
+                content="Here is the WRITER BRIEF for the article",
+                usage_metadata={
+                    "input_tokens": 10,
+                    "output_tokens": 20,
+                    "total_tokens": 30,
+                },
+                response_metadata={},
+            )
+        )
+        mocker.patch("langchain_openai.ChatOpenAI.ainvoke", side_effect=mock_response)
+
+        router_config = RouterConfig(
+            name="test_gate",
+            type="keyword",
+            routes={"writer": ["WRITER BRIEF"]},
+            default="human",
+        )
+        router = KeywordRouter(router_config)
+        agent = LLMAgent(
+            "researcher", test_settings, checkpointer, mock_cost_ledger,
+            router=router,
+        )
+        result = await agent.run("Write something", "thread-route")
+        assert result.next_agent == "writer"
+
+    async def test_no_router_returns_none_next_agent(
+        self, test_settings: Settings, mock_llm: AsyncMock, checkpointer: MemorySaver,
+        mock_cost_ledger: AsyncMock,
+    ) -> None:
+        """Without a router, RunResult.next_agent is None."""
+        agent = LLMAgent("researcher", test_settings, checkpointer, mock_cost_ledger)
+        result = await agent.run("test input", "thread-no-route")
+        assert result.next_agent is None
+
+    async def test_keyword_router_defaults_when_no_match(
+        self, test_settings: Settings, mock_llm: AsyncMock, checkpointer: MemorySaver,
+        mock_cost_ledger: AsyncMock,
+    ) -> None:
+        """When no trigger matches, router falls back to default."""
+        router_config = RouterConfig(
+            name="test_gate",
+            type="keyword",
+            routes={"writer": ["WRITER BRIEF"]},
+            default="human",
+        )
+        router = KeywordRouter(router_config)
+        agent = LLMAgent(
+            "researcher", test_settings, checkpointer, mock_cost_ledger,
+            router=router,
+        )
+        # mock_llm returns "Mocked LLM response for testing." — no trigger match
+        result = await agent.run("test input", "thread-default")
+        assert result.next_agent == "human"
