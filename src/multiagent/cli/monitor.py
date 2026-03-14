@@ -38,7 +38,8 @@ class AgentsPanel(Widget):
     DEFAULT_CSS = """
     AgentsPanel {
         border: solid $secondary;
-        height: 100%;
+        height: auto;
+        max-height: 50%;
         padding: 0 1;
     }
     AgentsPanel .agent-title {
@@ -98,7 +99,7 @@ class ThreadsPanel(Widget):
     DEFAULT_CSS = """
     ThreadsPanel {
         border: solid $secondary;
-        height: 100%;
+        height: 1fr;
         padding: 0;
     }
     ThreadsPanel OptionList {
