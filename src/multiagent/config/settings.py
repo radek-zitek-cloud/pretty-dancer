@@ -100,6 +100,11 @@ class Settings(BaseSettings):
         gt=0,
         description="Seconds between inbox polls when no message is available.",
     )
+    chat_reply_timeout_seconds: float = Field(
+        120.0,
+        gt=0,
+        description="Seconds to wait for an agent reply in chat mode before prompting.",
+    )
 
     # LLM
     openrouter_api_key: str = Field(..., description="OpenRouter API key. Required.")
