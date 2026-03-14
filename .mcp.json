@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "sqlite-transport": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite",
+        "--db-path",
+        "/home/radek/Code/march-26/pretty-dancer/data/agents.db"
+      ]
+    },
+    "sqlite-costs": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite",
+        "--db-path",
+        "/home/radek/Code/march-26/pretty-dancer/data/costs.db"
+      ]
+    },
+    "sqlite-checkpoints": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite",
+        "--db-path",
+        "/home/radek/Code/march-26/pretty-dancer/data/checkpoints.db"
+      ]
+    }
+  }
+}
