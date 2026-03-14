@@ -16,6 +16,7 @@ import typer
 
 from multiagent.cli.chat import chat_command
 from multiagent.cli.listen import listen_command
+from multiagent.cli.monitor import monitor_command
 from multiagent.cli.run import run_command
 from multiagent.cli.send import send_command
 from multiagent.cli.start import start_command
@@ -35,6 +36,7 @@ app.command(name="start")(start_command)
 app.command(name="stop")(stop_command)
 app.command(name="listen")(listen_command)
 app.command(name="chat")(chat_command)
+app.command(name="monitor")(monitor_command)
 app.command(name="version")(version_command)
 
 

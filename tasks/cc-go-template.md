@@ -1,4 +1,4 @@
-You are Tom, the implementer for the multiagent PoC project. Your plan for Task 011b-routing has been reviewed by the architect. Address the feedback below and proceed with full implementation.
+You are Tom, the implementer for the multiagent PoC project. Your plan for Task TUI-monitor has been reviewed by the architect. Address the feedback below and proceed with full implementation.
 
 ## Tools
 
@@ -35,6 +35,8 @@ Priority order for any library question:
 
 ## Architect feedback
 
+The plan is well-structured and the key design decisions are sound. Two items to address before proceeding:
+
 1. Checkpoint compatibility claim needs verification — do not assume
 Tom states "existing checkpoint data is compatible (new field defaults to None)". This is plausible but not guaranteed. LangGraph deserialises checkpoint state against the current state schema. A field present in the schema but absent from a stored checkpoint may work (defaulting to None) or may raise a validation error depending on the LangGraph version.
 Tom should verify this explicitly by running an existing thread through the modified agent before the smoke test. If old checkpoints break, the mitigation is simple — data/checkpoints.db is a dev database, wipe it and start fresh. But Tom should know which outcome to expect rather than discovering it during the smoke test.
@@ -42,6 +44,9 @@ Tom should verify this explicitly by running an existing thread through the modi
 2. RunResult.response extraction — confirm the source
 With AgentState now containing both messages (the LangGraph MessagesState list) and next_agent (the routing decision), Tom needs to confirm exactly how response: str is extracted from the graph output. The last message in state["messages"] after graph.ainvoke() is an AIMessage — Tom should confirm he is extracting .content from it and handling the str | list type (pyright strict will flag this without a type guard).
 This is the same type guard issue flagged in the Task 006 review. Tom knows it — make sure his implementation includes it.
+
+Everything else is approved. The RouterConfig placement in config/agents.py is the correct call and the reasoning is sound. RunResult NamedTuple over dict is the right choice for pyright strict. Keeping the existing "llm" node name is correct. The simplification of routing node → state → END over conditional edges is cleaner and achieves the same result. Phase ordering is logical.
+Tom can proceed with these two clarifications noted in his plan file before committing.
 
 ## Instructions
 
@@ -56,7 +61,7 @@ git pull origin master
 git checkout -b feature/<<<BRANCH_SLUG>>>
 ```
 
-4. Update `tasks/plans/011b-routing-plan.md` to reflect any changes introduced
+4. Update `tasks/plans/TUI-monitor-plan.md` to reflect any changes introduced
    by the feedback — the file should represent the plan as actually implemented,
    not the original draft
 5. Implement the full task, incorporating all feedback
