@@ -45,6 +45,10 @@ run agent experiment="":
 send agent body:
     uv run multiagent send {{agent}} "{{body}}"
 
+# Start all agents defined in agents.toml concurrently
+start experiment="":
+    uv run multiagent start {{if experiment != "" { "--experiment " + experiment } else { "" }}}
+
 # ── Database ───────────────────────────────────────────────────────────────
 
 # Show last N messages across all agents (default 20)
