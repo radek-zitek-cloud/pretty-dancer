@@ -9,3 +9,4 @@ handed to Claude Code for planning and implementation.
 DRAFT → APPROVED → IN PROGRESS → COMPLETE
 
 Completed tasks are kept as permanent record — do not delete them.
+
