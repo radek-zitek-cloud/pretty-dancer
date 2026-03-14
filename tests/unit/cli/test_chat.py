@@ -18,7 +18,7 @@ def cli_runner() -> typer.testing.CliRunner:
 
 
 @pytest.fixture
-def _mock_chat_deps() -> Generator[dict[str, MagicMock | AsyncMock]]:
+def _mock_chat_deps() -> Generator[dict[str, MagicMock | AsyncMock]]:  # pyright: ignore[reportUnusedFunction]
     """Mock settings, agents config, and transport for chat command."""
     mock_transport = AsyncMock()
     mock_transport.send = AsyncMock()
@@ -114,7 +114,11 @@ class TestChatCommand:
             with pytest.raises(SystemExit) as exc_info:
                 from multiagent.cli.chat import chat_command
 
-                chat_command(agent_name="progressive")
+                chat_command(
+                    agent_name="progressive",
+                    thread_id="",
+                    experiment="",
+                )
             assert exc_info.value.code == 0
 
     @pytest.mark.usefixtures("_mock_chat_deps")

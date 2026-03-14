@@ -18,8 +18,15 @@ from rich.panel import Panel
 
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
-from multiagent.transport import create_transport
+from multiagent.transport import Transport, create_transport
 from multiagent.transport.base import Message
+
+
+async def _async_input(prompt: str) -> str:
+    """Run blocking input() in a thread executor to avoid ASYNC250."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, input, prompt)
+
 
 _REPLY_QUERY = """\
 SELECT id, from_agent, body, created_at
@@ -30,16 +37,12 @@ ORDER BY created_at ASC
 
 
 async def _send_message(
-    settings_obj: object,
-    transport: object,
+    transport: Transport,
     agent_name: str,
     body: str,
     thread_id: str,
 ) -> None:
     """Send a single message from human to agent via the transport layer."""
-    from multiagent.transport.base import Transport as _T
-
-    assert isinstance(transport, _T)
     msg = Message(
         from_agent="human",
         to_agent=agent_name,
@@ -52,7 +55,7 @@ async def _send_message(
 async def _poll_reply(
     db_path: str,
     thread_id: str,
-    timeout: float,
+    reply_timeout: float,
     poll_interval: float,
 ) -> tuple[str, str, int] | None:
     """Poll for an agent reply addressed to human in the given thread.
@@ -62,7 +65,7 @@ async def _poll_reply(
     elapsed = 0.0
     async with aiosqlite.connect(db_path) as conn:
         conn.row_factory = aiosqlite.Row
-        while elapsed < timeout:
+        while elapsed < reply_timeout:
             cursor = await conn.execute(_REPLY_QUERY, (thread_id,))
             row = await cursor.fetchone()
             if row is not None:
@@ -81,10 +84,9 @@ async def _poll_reply(
 async def _chat_loop(
     agent_name: str,
     thread_id: str,
-    settings: object,
-    transport: object,
+    transport: Transport,
     db_path: str,
-    timeout: float,
+    reply_timeout: float,
     poll_interval: float,
 ) -> None:
     """Main chat REPL loop."""
@@ -97,30 +99,30 @@ async def _chat_loop(
 
     while True:
         try:
-            user_input = input("You: ")
+            user_input = await _async_input("You: ")
         except EOFError:
             break
 
         if not user_input.strip():
             break
 
-        await _send_message(settings, transport, agent_name, user_input, thread_id)
+        await _send_message(transport, agent_name, user_input, thread_id)
 
         console.print("[dim]Waiting for reply…[/dim]")
-        reply = await _poll_reply(db_path, thread_id, timeout, poll_interval)
+        reply = await _poll_reply(db_path, thread_id, reply_timeout, poll_interval)
 
         if reply is None:
             console.print(
-                f"[yellow]No reply after {timeout:.0f}s. "
+                f"[yellow]No reply after {reply_timeout:.0f}s. "
                 f"Continue waiting? (y/n)[/yellow]"
             )
             try:
-                choice = input("> ").strip().lower()
+                choice = (await _async_input("> ")).strip().lower()
             except EOFError:
                 break
             if choice == "y":
                 reply = await _poll_reply(
-                    db_path, thread_id, timeout, poll_interval
+                    db_path, thread_id, reply_timeout, poll_interval
                 )
             if reply is None:
                 console.print("[red]Still no reply. Continuing…[/red]")
@@ -180,7 +182,6 @@ def chat_command(
             _chat_loop(
                 agent_name,
                 thread_id,
-                settings,
                 transport,
                 db_path,
                 settings.chat_reply_timeout_seconds,

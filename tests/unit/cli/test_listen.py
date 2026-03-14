@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for the ``multiagent listen`` command."""
 
 from __future__ import annotations
@@ -169,5 +170,5 @@ class TestListenCommand:
             return_value=_make_settings(":memory:"),
         ):
             with pytest.raises(SystemExit) as exc_info:
-                listen_command()
+                listen_command(thread_id="", poll_interval=0)
             assert exc_info.value.code == 0
