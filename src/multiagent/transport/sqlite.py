@@ -242,6 +242,56 @@ class SQLiteTransport(Transport):
         rows = await cursor.fetchall()
         return [self._row_to_message(row) for row in rows]
 
+    async def thread_messages_tail(
+        self, thread_id: str, limit: int,
+    ) -> list[tuple[str, str]]:
+        """Return (from_agent, to_agent) pairs for the most recent messages.
+
+        Returns up to ``limit`` messages on a thread, ordered most-recent-first.
+        Not part of the Transport ABC — used by AgentRunner termination checks
+        only when the transport is SQLite-backed.
+
+        Args:
+            thread_id: The conversation thread to query.
+            limit: Maximum number of messages to return.
+
+        Returns:
+            List of (from_agent, to_agent) tuples, most recent first.
+        """
+        conn = await self._get_connection()
+        cursor = await conn.execute(
+            """
+            SELECT from_agent, to_agent FROM messages
+            WHERE thread_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (thread_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [(row["from_agent"], row["to_agent"]) for row in rows]
+
+    async def thread_message_count(self, thread_id: str) -> int:
+        """Return the total number of messages on a thread.
+
+        Not part of the Transport ABC — used by AgentRunner termination checks
+        only when the transport is SQLite-backed.
+
+        Args:
+            thread_id: The conversation thread to query.
+
+        Returns:
+            Total message count. Zero if the thread does not exist.
+        """
+        conn = await self._get_connection()
+        cursor = await conn.execute(
+            "SELECT COUNT(*) as cnt FROM messages WHERE thread_id = ?",
+            (thread_id,),
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        return int(row["cnt"])
+
     async def close(self) -> None:
         """Release the database connection. Idempotent."""
         if self._conn is not None:

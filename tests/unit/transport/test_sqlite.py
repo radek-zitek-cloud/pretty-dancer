@@ -226,6 +226,52 @@ class TestSQLiteTransportHumanRecipient:
         assert result.body == "reply"
 
 
+class TestSQLiteTransportThreadMessagesTail:
+    async def test_returns_most_recent_first(
+        self, transport: SQLiteTransport
+    ) -> None:
+        tid = "tail-thread"
+        await transport.send(Message(from_agent="a", to_agent="b", body="1", thread_id=tid))
+        await transport.send(Message(from_agent="b", to_agent="c", body="2", thread_id=tid))
+        await transport.send(Message(from_agent="c", to_agent="d", body="3", thread_id=tid))
+        result = await transport.thread_messages_tail(tid, 3)
+        assert result == [("c", "d"), ("b", "c"), ("a", "b")]
+
+    async def test_respects_limit(
+        self, transport: SQLiteTransport
+    ) -> None:
+        tid = "limit-thread"
+        await transport.send(Message(from_agent="a", to_agent="b", body="1", thread_id=tid))
+        await transport.send(Message(from_agent="b", to_agent="c", body="2", thread_id=tid))
+        await transport.send(Message(from_agent="c", to_agent="d", body="3", thread_id=tid))
+        result = await transport.thread_messages_tail(tid, 2)
+        assert len(result) == 2
+        assert result[0] == ("c", "d")
+
+    async def test_returns_empty_for_unknown_thread(
+        self, transport: SQLiteTransport
+    ) -> None:
+        result = await transport.thread_messages_tail("nonexistent", 5)
+        assert result == []
+
+
+class TestSQLiteTransportThreadMessageCount:
+    async def test_returns_correct_count(
+        self, transport: SQLiteTransport
+    ) -> None:
+        tid = "count-thread"
+        await transport.send(Message(from_agent="a", to_agent="b", body="1", thread_id=tid))
+        await transport.send(Message(from_agent="b", to_agent="c", body="2", thread_id=tid))
+        count = await transport.thread_message_count(tid)
+        assert count == 2
+
+    async def test_returns_zero_for_unknown_thread(
+        self, transport: SQLiteTransport
+    ) -> None:
+        count = await transport.thread_message_count("nonexistent")
+        assert count == 0
+
+
 class TestSQLiteTransportClose:
     async def test_close_is_idempotent(
         self, transport: SQLiteTransport
