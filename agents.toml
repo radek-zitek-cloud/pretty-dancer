@@ -1,14 +1,9 @@
-[agents.scout]
-next_agent = "edith"
+[agents.editor]
+next_agent = "human"        # editor always replies to human during dialogue
+                            # will become dynamic routing in Task 011b
 
-[agents.edith]
-next_agent = "digger"
+[agents.writer]
+next_agent = "linguist"
 
-[agents.digger]
-next_agent = "vera"
-
-[agents.vera]
-next_agent = "prose"
-
-[agents.prose]
-# terminal — no next_agent
+[agents.linguist]
+next_agent = "human"        # finished article goes back to human
