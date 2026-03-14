@@ -31,18 +31,24 @@ GROUP BY thread_id
 ORDER BY MAX(created_at) DESC
 """
 
+COST_PER_THREAD_QUERY = """\
+SELECT thread_id, SUM(cost_usd) AS total_cost
+FROM cost_ledger
+GROUP BY thread_id
+"""
 
-def _load_db_path() -> Path:
-    """Load database path from application settings.
+
+def _load_settings() -> tuple[Path, Path]:
+    """Load database paths from application settings.
 
     Returns:
-        Path to the SQLite transport database.
+        Tuple of (transport db path, cost db path).
     """
     try:
         from multiagent.config.settings import Settings
 
         settings = Settings()  # type: ignore[call-arg]
-        return settings.sqlite_db_path
+        return settings.sqlite_db_path, settings.cost_db_path
     except Exception as exc:
         print(f"Cannot load settings: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -69,23 +75,51 @@ def _truncate(text: str | None, length: int = 60) -> str:
     return text[: length - 1] + "\u2026"
 
 
-def _display_table(console: Console, rows: list[sqlite3.Row]) -> None:
+def _fetch_cost_lookup(cost_db_path: Path) -> dict[str, float]:
+    """Query cost_ledger for per-thread cost totals.
+
+    Returns an empty dict if the database doesn't exist or has no data.
+    """
+    if not cost_db_path.exists():
+        return {}
+    try:
+        conn = sqlite3.connect(str(cost_db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(COST_PER_THREAD_QUERY).fetchall()
+            return {str(row["thread_id"]): float(row["total_cost"]) for row in rows}
+        finally:
+            conn.close()
+    except Exception:
+        return {}
+
+
+def _display_table(
+    console: Console,
+    rows: list[sqlite3.Row],
+    cost_lookup: dict[str, float],
+) -> None:
     """Display threads as a numbered rich table."""
     table = Table(title="Conversation Threads")
     table.add_column("#", justify="right", style="bold")
     table.add_column("Thread ID")
     table.add_column("Messages", justify="right")
     table.add_column("Processed", justify="right")
+    table.add_column("Cost", justify="right")
     table.add_column("Preview")
     table.add_column("Started")
     table.add_column("Last activity")
 
     for i, row in enumerate(rows, 1):
+        thread_id = str(row["thread_id"])
+        cost = cost_lookup.get(thread_id)
+        cost_str = f"${cost:.4f}" if cost is not None else "\u2014"
         table.add_row(
             str(i),
-            str(row["thread_id"])[:8],
+            thread_id[:8],
             str(row["message_count"]),
             str(row["processed_count"]),
+            cost_str,
             _truncate(row["preview"]),
             _format_time(row["started_at"]),
             _format_time(row["last_at"]),
@@ -106,7 +140,7 @@ def _fetch_rows(db_path: Path) -> list[sqlite3.Row]:
 
 def main() -> None:
     """Entry point for browse_threads script."""
-    db_path = _load_db_path()
+    db_path, cost_db_path = _load_settings()
 
     if not db_path.exists():
         print(f"Database not found: {db_path}", file=sys.stderr)
@@ -115,11 +149,12 @@ def main() -> None:
     console = Console()
 
     rows = _fetch_rows(db_path)
+    cost_lookup = _fetch_cost_lookup(cost_db_path)
     if not rows:
         console.print("No threads found in database.")
         sys.exit(0)
 
-    _display_table(console, rows)
+    _display_table(console, rows, cost_lookup)
 
     while True:
         try:
@@ -132,7 +167,8 @@ def main() -> None:
 
         if choice.lower() == "r":
             rows = _fetch_rows(db_path)
-            _display_table(console, rows)
+            cost_lookup = _fetch_cost_lookup(cost_db_path)
+            _display_table(console, rows, cost_lookup)
             continue
 
         try:
@@ -151,7 +187,8 @@ def main() -> None:
 
         # Refresh data and redisplay table after returning from show_thread
         rows = _fetch_rows(db_path)
-        _display_table(console, rows)
+        cost_lookup = _fetch_cost_lookup(cost_db_path)
+        _display_table(console, rows, cost_lookup)
 
 
 if __name__ == "__main__":

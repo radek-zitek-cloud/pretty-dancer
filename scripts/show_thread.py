@@ -15,12 +15,27 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 
 AGENT_COLOURS: dict[str, str] = {
     "human": "blue",
     "researcher": "green",
     "critic": "yellow",
 }
+
+COST_SUMMARY_QUERY = """\
+SELECT
+    agent,
+    COUNT(*)            AS calls,
+    SUM(input_tokens)   AS input_tokens,
+    SUM(output_tokens)  AS output_tokens,
+    SUM(total_tokens)   AS total_tokens,
+    SUM(cost_usd)       AS cost_usd
+FROM cost_ledger
+WHERE thread_id = ?
+GROUP BY agent
+ORDER BY MIN(timestamp)
+"""
 
 
 def _resolve_db_path(cli_db: str | None) -> Path:
@@ -45,6 +60,86 @@ def _resolve_db_path(cli_db: str | None) -> Path:
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def _load_cost_db_path() -> Path | None:
+    """Load cost database path from settings.
+
+    Returns:
+        Path to costs.db, or None if settings cannot be loaded.
+    """
+    try:
+        from multiagent.config.settings import Settings
+
+        settings = Settings()  # type: ignore[call-arg]
+        return settings.cost_db_path
+    except Exception:
+        return None
+
+
+def _render_cost_footer(console: Console, thread_id: str, cost_db_path: Path | None) -> None:
+    """Render a cost summary footer for the thread, if cost data exists."""
+    if cost_db_path is None or not cost_db_path.exists():
+        return
+
+    try:
+        conn = sqlite3.connect(str(cost_db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(COST_SUMMARY_QUERY, (thread_id,)).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return
+
+    if not rows:
+        return
+
+    table = Table(title=f"Cost summary \u2014 thread {thread_id[:8]}")
+    table.add_column("Agent", style="bold")
+    table.add_column("Calls", justify="right")
+    table.add_column("Input tokens", justify="right")
+    table.add_column("Output tokens", justify="right")
+    table.add_column("Total tokens", justify="right")
+    table.add_column("Cost USD", justify="right")
+
+    total_calls = 0
+    total_input = 0
+    total_output = 0
+    total_tokens = 0
+    total_cost = 0.0
+
+    for row in rows:
+        calls = int(row["calls"])
+        inp = int(row["input_tokens"])
+        out = int(row["output_tokens"])
+        tok = int(row["total_tokens"])
+        cost = float(row["cost_usd"])
+        total_calls += calls
+        total_input += inp
+        total_output += out
+        total_tokens += tok
+        total_cost += cost
+        table.add_row(
+            str(row["agent"]),
+            str(calls),
+            str(inp),
+            str(out),
+            str(tok),
+            f"${cost:.4f}",
+        )
+
+    table.add_row(
+        "[bold]Total[/bold]",
+        f"[bold]{total_calls}[/bold]",
+        f"[bold]{total_input}[/bold]",
+        f"[bold]{total_output}[/bold]",
+        f"[bold]{total_tokens}[/bold]",
+        f"[bold]${total_cost:.4f}[/bold]",
+    )
+
+    console.print()
+    console.print(table)
 
 
 def main() -> None:
@@ -111,6 +206,10 @@ def main() -> None:
                 border_style=colour,
             )
         )
+
+    # Cost summary footer
+    cost_db_path = _load_cost_db_path()
+    _render_cost_footer(console, args.thread_id, cost_db_path)
 
 
 if __name__ == "__main__":

@@ -91,6 +91,7 @@ def main() -> None:
         console.print("[bold]LLM Calls[/bold]")
         all_input_tokens: list[int | None] = []
         all_output_tokens: list[int | None] = []
+        all_costs: list[float] = []
         for i, te in enumerate(trace_events, 1):
             agent = str(te.get("agent", "?"))
             ts = str(te.get("timestamp", "?"))
@@ -98,13 +99,19 @@ def main() -> None:
             output_chars = te.get("output_chars", "?")
             input_tokens = te.get("input_tokens")
             output_tokens = te.get("output_tokens")
+            cost_usd = te.get("cost_usd")
             all_input_tokens.append(input_tokens if isinstance(input_tokens, int) else None)
             all_output_tokens.append(output_tokens if isinstance(output_tokens, int) else None)
+            all_costs.append(float(cost_usd) if isinstance(cost_usd, (int, float)) else 0.0)
             system_prompt = str(te.get("system_prompt", ""))[:200]
             prompt = str(te.get("prompt", ""))
             response = str(te.get("response", ""))
 
-            token_info = f"Input tokens: {input_tokens}  |  Output tokens: {output_tokens}"
+            cost_str = f"  |  Cost: ${all_costs[-1]:.4f}" if cost_usd is not None else ""
+            token_info = (
+                f"Input tokens: {input_tokens}  |  Output tokens: {output_tokens}"
+                f"{cost_str}"
+            )
             console.print(
                 Panel(
                     f"Agent: {agent}  |  Time: {ts}\n"
@@ -123,9 +130,11 @@ def main() -> None:
         ):
             total_in = sum(t for t in all_input_tokens if t is not None)
             total_out = sum(t for t in all_output_tokens if t is not None)
+            total_cost = sum(all_costs)
             console.print(
                 f"Total: {len(trace_events)} LLM calls  |  "
-                f"{total_in} input tokens  |  {total_out} output tokens"
+                f"{total_in} input tokens  |  {total_out} output tokens  |  "
+                f"Cost: ${total_cost:.4f}"
             )
         else:
             console.print("Token counts unavailable for one or more calls.")

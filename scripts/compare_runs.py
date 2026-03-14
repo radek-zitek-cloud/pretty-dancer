@@ -155,6 +155,17 @@ def main() -> None:
         {str(e.get("agent", "")) for e in traces1 + traces2 if e.get("agent")}
     )
     if agents_all and (traces1 or traces2):
+        cost1 = sum(
+            float(t.get("cost_usd", 0.0))
+            for t in traces1
+            if isinstance(t.get("cost_usd"), (int, float))
+        )
+        cost2 = sum(
+            float(t.get("cost_usd", 0.0))
+            for t in traces2
+            if isinstance(t.get("cost_usd"), (int, float))
+        )
+
         timing_table = Table(title="Call Counts by Agent")
         timing_table.add_column("Agent", style="bold")
         timing_table.add_column("Run 1 calls", justify="right")
@@ -163,6 +174,11 @@ def main() -> None:
             c1 = sum(1 for t in traces1 if str(t.get("agent")) == agent)
             c2 = sum(1 for t in traces2 if str(t.get("agent")) == agent)
             timing_table.add_row(agent, str(c1), str(c2))
+        timing_table.add_row(
+            "[bold]Total cost[/bold]",
+            f"[bold]${cost1:.4f}[/bold]",
+            f"[bold]${cost2:.4f}[/bold]",
+        )
         console.print(timing_table)
 
 
