@@ -12,6 +12,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
 from multiagent.core.agent import LLMAgent
+from multiagent.core.costs import CostLedger
 from multiagent.core.runner import AgentRunner
 from multiagent.core.shutdown import ShutdownMonitor
 from multiagent.logging import configure_logging
@@ -21,6 +22,8 @@ from multiagent.transport import create_transport
 async def _start(experiment: str) -> None:
     """Load config, construct shared resources, and run all agents."""
     settings = load_settings()
+    if experiment:
+        settings.experiment = experiment
     human_log, json_log = configure_logging(
         settings, agent_name="cluster", experiment=experiment
     )
@@ -48,34 +51,35 @@ async def _start(experiment: str) -> None:
     async with AsyncSqliteSaver.from_conn_string(
         str(settings.checkpointer_db_path)
     ) as checkpointer:
-        try:
-            async with asyncio.TaskGroup() as tg:
-                for name, config in agent_configs.items():
-                    agent = LLMAgent(name, settings, checkpointer)
-                    runner = AgentRunner(
-                        agent,
-                        transport,
-                        settings,
-                        next_agent=config.next_agent,
-                        shutdown_monitor=monitor,
-                    )
-                    log.info(
-                        "agent_starting",
-                        agent=name,
-                        next_agent=config.next_agent,
-                    )
-                    tg.create_task(runner.run_loop(), name=name)
-        except* asyncio.CancelledError:
-            pass  # clean shutdown — all tasks cancelled together
-        except* Exception as eg:
-            for exc in eg.exceptions:
-                log.error("agent_task_failed", error=str(exc))
-            raise
-        finally:
-            monitor.clear()
-            await transport.close()
+        async with CostLedger(settings.cost_db_path) as cost_ledger:
+            try:
+                async with asyncio.TaskGroup() as tg:
+                    for name, config in agent_configs.items():
+                        agent = LLMAgent(name, settings, checkpointer, cost_ledger)
+                        runner = AgentRunner(
+                            agent,
+                            transport,
+                            settings,
+                            next_agent=config.next_agent,
+                            shutdown_monitor=monitor,
+                        )
+                        log.info(
+                            "agent_starting",
+                            agent=name,
+                            next_agent=config.next_agent,
+                        )
+                        tg.create_task(runner.run_loop(), name=name)
+            except* asyncio.CancelledError:
+                pass  # clean shutdown — all tasks cancelled together
+            except* Exception as eg:
+                for exc in eg.exceptions:
+                    log.error("agent_task_failed", error=str(exc))
+                raise
+            finally:
+                monitor.clear()
+                await transport.close()
 
-        log.info("cluster_stopped", agents=list(agent_configs.keys()))
+            log.info("cluster_stopped", agents=list(agent_configs.keys()))
 
 
 def start_command(

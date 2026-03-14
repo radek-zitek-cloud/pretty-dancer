@@ -12,6 +12,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
 from multiagent.core.agent import LLMAgent
+from multiagent.core.costs import CostLedger
 from multiagent.core.runner import AgentRunner
 from multiagent.core.shutdown import ShutdownMonitor
 from multiagent.logging import configure_logging
@@ -24,6 +25,8 @@ async def _run(
 ) -> None:
     """Async entry point for the run command."""
     settings = load_settings()
+    if experiment:
+        settings.experiment = experiment
     human_log, json_log = configure_logging(settings, agent_name=agent_name, experiment=experiment)
     log = structlog.get_logger(__name__)
 
@@ -49,20 +52,21 @@ async def _run(
     async with AsyncSqliteSaver.from_conn_string(
         str(settings.checkpointer_db_path)
     ) as checkpointer:
-        agent = LLMAgent(agent_name, settings, checkpointer)
-        runner = AgentRunner(
-            agent,
-            transport,
-            settings,
-            next_agent=agent_config.next_agent,
-            shutdown_monitor=monitor,
-        )
-        log.info("agent_starting", agent=agent_name, next_agent=agent_config.next_agent)
-        try:
-            await runner.run_loop()
-        finally:
-            monitor.clear(agent_name)
-            await transport.close()
+        async with CostLedger(settings.cost_db_path) as cost_ledger:
+            agent = LLMAgent(agent_name, settings, checkpointer, cost_ledger)
+            runner = AgentRunner(
+                agent,
+                transport,
+                settings,
+                next_agent=agent_config.next_agent,
+                shutdown_monitor=monitor,
+            )
+            log.info("agent_starting", agent=agent_name, next_agent=agent_config.next_agent)
+            try:
+                await runner.run_loop()
+            finally:
+                monitor.clear(agent_name)
+                await transport.close()
 
 
 def run_command(
