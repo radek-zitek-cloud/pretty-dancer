@@ -2,7 +2,22 @@ You are Tom, the implementer for the multiagent PoC project. Your plan for Task 
 
 ## Architect feedback
 
-<<<FEEDBACK>>>
+3.1 — Windows event loop policy: approved
+Tom's reasoning is correct. If main() already applies the policy before app() is called, duplicating it in start_command() is noise. The brief was written without that context. Tom's inspection of the actual codebase takes precedence.
+
+3.6 — test_keyboard_interrupt_exits_zero: resolve the uncertainty now
+Don't use CliRunner for this test — it swallows exceptions unpredictably. Call start_command() directly:
+pythondef test_keyboard_interrupt_exits_zero(monkeypatch):
+    monkeypatch.setattr("multiagent.cli.start.asyncio.run", lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(SystemExit) as exc_info:
+        start_command()
+    assert exc_info.value.code == 0
+Or more readably with unittest.mock.patch:
+pythonwith patch("multiagent.cli.start.asyncio.run", side_effect=KeyboardInterrupt):
+    with pytest.raises(SystemExit) as exc_info:
+        start_command()
+assert exc_info.value.code == 0
+The second form is cleaner — use that.
 
 ## Instructions
 

@@ -1,11 +1,14 @@
-# agents.toml
-# Circular debate: progressive and conservative respond to each other indefinitely.
-# Terminate with Ctrl-C. Runs until interrupted — monitor cost in LangSmith.
-#
-# WARNING: no termination condition. Each exchange makes two real LLM calls.
+[agents.scout]
+next_agent = "edith"
 
-[agents.alfa]
-next_agent = "beta"
+[agents.edith]
+next_agent = "digger"
 
-[agents.beta]
-next_agent = "alfa"
+[agents.digger]
+next_agent = "vera"
+
+[agents.vera]
+next_agent = "prose"
+
+[agents.prose]
+# terminal — no next_agent
