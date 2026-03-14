@@ -11,7 +11,6 @@ from typing import Any
 
 import aiosqlite
 import typer
-from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -70,22 +69,22 @@ class AgentsPanel(Widget):
         """Refresh agent statuses and thread count."""
         self._status = status
         self._thread_count = thread_count
-        lines: list[Text] = []
+        lines: list[str] = []
         for name in self._agent_names:
             active = self._status.get(name, False)
-            dot = Text("● ", style="green") if active else Text("○ ", style="dim")
-            label = "active" if active else "idle"
-            style = "bold" if active else "dim"
-            line = dot + Text(f"{name:<12} ", style="") + Text(label, style=style)
+            if active:
+                line = f"[green]●[/] [bold]{name:<12}[/] [bold]active[/]"
+            else:
+                line = f"[dim]○[/] {name:<12} [dim]idle[/]"
             lines.append(line)
-        rendered = Text("\n").join(lines)
+        rendered = "\n".join(lines)
         try:
             self.query_one("#agent-list", Static).update(rendered)
         except Exception:
             pass
-        stats = Text(
-            f"\nPoll: {self._poll_interval}s\nThreads: {self._thread_count}",
-            style="dim",
+        stats = (
+            f"\n[dim]Poll: {self._poll_interval}s\n"
+            f"Threads: {self._thread_count}[/]"
         )
         try:
             self.query_one("#agent-stats", Static).update(stats)
@@ -187,6 +186,11 @@ class MessageRow(Static):
         self._expanded = False
         self._render_content()
 
+    @staticmethod
+    def _esc(text: str) -> str:
+        """Escape markup special characters in user content."""
+        return text.replace("[", r"\[")
+
     def _render_content(self) -> None:
         """Build the display text based on expanded state."""
         from_a = str(self._msg.get("from_agent", "?"))
@@ -203,34 +207,31 @@ class MessageRow(Static):
                 ts_str = str(ts_raw)[:8]
 
         unprocessed = self._msg.get("processed_at") is None
-        dot = " ●" if unprocessed else ""
+        dot = " [yellow]●[/]" if unprocessed else ""
 
-        header = Text()
-        header.append(f"{from_a:<10}", style="bold cyan")
-        header.append(" → ", style="dim")
-        header.append(f"{to_a:<10}", style="cyan")
+        header = (
+            f"[bold]{self._esc(from_a):<10}[/]"
+            f" → "
+            f"{self._esc(to_a):<10}"
+        )
 
         if self._expanded:
-            indicator = " ▾"
-            header.append(f"  {ts_str}", style="dim")
-            if dot:
-                header.append(dot, style="yellow")
-            header.append(indicator, style="dim")
-            header.append("\n")
-            header.append(body, style="")
+            line = (
+                f"{header}  [dim]{ts_str}[/]{dot} [dim]▾[/]\n"
+                f"{self._esc(body)}"
+            )
         else:
             truncated = body.replace("\n", " ")
+            is_long = len(body) > 80 or "\n" in str(self._msg.get("body", ""))
             if len(truncated) > 80:
                 truncated = truncated[:77] + "..."
-            indicator = " ▸" if len(body) > 80 or "\n" in str(self._msg.get("body", "")) else ""
-            header.append(f" {truncated}", style="")
-            header.append(f"  {ts_str}", style="dim")
-            if dot:
-                header.append(dot, style="yellow")
-            if indicator:
-                header.append(indicator, style="dim")
+            indicator = " [dim]▸[/]" if is_long else ""
+            line = (
+                f"{header} {self._esc(truncated)}"
+                f"  [dim]{ts_str}[/]{dot}{indicator}"
+            )
 
-        self.update(header)
+        self.update(line)
 
     def on_click(self) -> None:
         """Toggle expanded state."""
