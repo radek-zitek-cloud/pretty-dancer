@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
 import pytest
-import typer
 import typer.testing
 
 from multiagent.cli.main import app
 
 
 @pytest.fixture
-def cli_runner():
+def cli_runner() -> typer.testing.CliRunner:
     return typer.testing.CliRunner()
 
 
-@pytest.fixture
-def _mock_send_deps():
+@pytest.fixture(autouse=False)
+def _mock_send_deps() -> Generator[None]:  # pyright: ignore[reportUnusedFunction]
     """Mock load_settings, load_agents_config, and create_transport."""
     mock_transport = AsyncMock()
     mock_transport.send = AsyncMock()
@@ -33,7 +33,9 @@ def _mock_send_deps():
 
 class TestSendThreadId:
     @pytest.mark.usefixtures("_mock_send_deps")
-    def test_new_thread_id_generated_when_flag_omitted(self, cli_runner):
+    def test_new_thread_id_generated_when_flag_omitted(
+        self, cli_runner: typer.testing.CliRunner
+    ) -> None:
         result = cli_runner.invoke(app, ["send", "progressive", "Hello"])
         assert result.exit_code == 0
         # Output contains a valid UUID thread_id
@@ -43,7 +45,9 @@ class TestSendThreadId:
         uuid.UUID(thread_part)  # raises if not valid UUID
 
     @pytest.mark.usefixtures("_mock_send_deps")
-    def test_supplied_thread_id_used_in_message(self, cli_runner):
+    def test_supplied_thread_id_used_in_message(
+        self, cli_runner: typer.testing.CliRunner
+    ) -> None:
         existing_id = str(uuid.uuid4())
         result = cli_runner.invoke(
             app, ["send", "progressive", "Continue", "--thread-id", existing_id]
@@ -52,7 +56,9 @@ class TestSendThreadId:
         assert existing_id in result.output
 
     @pytest.mark.usefixtures("_mock_send_deps")
-    def test_invalid_uuid_raises_bad_parameter(self, cli_runner):
+    def test_invalid_uuid_raises_bad_parameter(
+        self, cli_runner: typer.testing.CliRunner
+    ) -> None:
         result = cli_runner.invoke(
             app, ["send", "progressive", "body", "--thread-id", "not-a-uuid"]
         )
@@ -60,7 +66,9 @@ class TestSendThreadId:
         assert "thread-id must be a valid UUID" in result.output
 
     @pytest.mark.usefixtures("_mock_send_deps")
-    def test_output_prints_thread_id_used(self, cli_runner):
+    def test_output_prints_thread_id_used(
+        self, cli_runner: typer.testing.CliRunner
+    ) -> None:
         existing_id = str(uuid.uuid4())
         result = cli_runner.invoke(
             app, ["send", "progressive", "Resume", "-t", existing_id]

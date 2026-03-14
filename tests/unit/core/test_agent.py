@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
+from pytest_mock import MockerFixture
 
 from multiagent.config.settings import Settings
 from multiagent.core.agent import LLMAgent
@@ -91,7 +92,7 @@ class TestLLMAgentRun:
 
 class TestLLMAgentHistory:
     async def test_second_call_includes_first_message_in_history(
-        self, test_settings: Settings, mocker: pytest.MonkeyPatch, checkpointer: MemorySaver,
+        self, test_settings: Settings, mocker: MockerFixture, checkpointer: MemorySaver,
     ) -> None:
         """On the second call with the same thread_id, the LLM receives
         the first HumanMessage + AIMessage + second HumanMessage."""
@@ -118,7 +119,7 @@ class TestLLMAgentHistory:
         assert conversation_messages[2].content == "second input"
 
     async def test_different_thread_ids_have_independent_histories(
-        self, test_settings: Settings, mocker: pytest.MonkeyPatch, checkpointer: MemorySaver,
+        self, test_settings: Settings, mocker: MockerFixture, checkpointer: MemorySaver,
     ) -> None:
         """Different thread_ids do not share history."""
         from langchain_core.messages import AIMessage
@@ -141,7 +142,7 @@ class TestLLMAgentHistory:
             assert len(conversation_messages) == 1
 
     async def test_same_thread_id_accumulates_messages_across_calls(
-        self, test_settings: Settings, mocker: pytest.MonkeyPatch, checkpointer: MemorySaver,
+        self, test_settings: Settings, mocker: MockerFixture, checkpointer: MemorySaver,
     ) -> None:
         """Three calls on the same thread accumulate 5 conversation messages
         by the third call: H1, A1, H2, A2, H3."""

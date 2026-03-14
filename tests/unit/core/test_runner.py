@@ -1,10 +1,12 @@
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from multiagent.config.settings import Settings
 from multiagent.core.runner import AgentRunner
+from multiagent.core.shutdown import ShutdownMonitor
 from multiagent.exceptions import AgentLLMError
 from multiagent.transport.base import Message
 
@@ -238,3 +240,46 @@ class TestAgentRunnerRunLoop:
             with pytest.raises(asyncio.CancelledError):
                 await runner.run_loop()
         mock_sleep.assert_not_called()
+
+    async def test_loop_exits_when_shutdown_monitor_signals_stop(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        tmp_path: Path,
+    ) -> None:
+        monitor = ShutdownMonitor(tmp_path)
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings, shutdown_monitor=monitor
+        )
+        monitor.request_stop("researcher")
+        # run_loop raises CancelledError so TaskGroup cleans up properly
+        with pytest.raises(asyncio.CancelledError):
+            await runner.run_loop()
+
+    async def test_loop_continues_when_shutdown_monitor_has_no_sentinel(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        tmp_path: Path,
+    ) -> None:
+        monitor = ShutdownMonitor(tmp_path)
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings, shutdown_monitor=monitor
+        )
+        call_count = 0
+
+        async def receive_then_cancel(agent_name: str) -> Message | None:
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                raise asyncio.CancelledError
+            return None
+
+        mock_transport.receive.side_effect = receive_then_cancel
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(asyncio.CancelledError):
+                await runner.run_loop()
+        # Verify it polled at least twice (didn't exit early)
+        assert call_count == 2

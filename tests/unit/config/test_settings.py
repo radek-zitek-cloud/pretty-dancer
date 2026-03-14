@@ -41,6 +41,7 @@ class TestObservabilitySettings:
 
     def test_log_console_level_defaults_to_info(self) -> None:
         s = Settings(
+            _env_file=None,  # type: ignore[call-arg]
             greeting_secret="secret",  # type: ignore[call-arg]
             openrouter_api_key="test-key",  # type: ignore[call-arg]
         )

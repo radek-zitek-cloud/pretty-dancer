@@ -32,7 +32,7 @@ git worktree add ../pretty-dancer-<<<BRANCH_SLUG>>> feature/<<<BRANCH_SLUG>>>
 cd ../pretty-nurse-<<<BRANCH_SLUG>>>
 ```
 
-4. Update `tasks/plans/008-start-plan.md` to reflect any changes introduced
+4. Update `tasks/plans/009-cost-tracking.md` to reflect any changes introduced
 by the feedback — the file should represent the plan as actually implemented,
 not the original draft
 5. Implement the full task, incorporating all feedback

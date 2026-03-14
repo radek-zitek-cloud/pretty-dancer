@@ -13,6 +13,7 @@ from multiagent.transport.base import Message
 if TYPE_CHECKING:
     from multiagent.config.settings import Settings
     from multiagent.core.agent import LLMAgent
+    from multiagent.core.shutdown import ShutdownMonitor
     from multiagent.transport.base import Transport
 
 
@@ -30,11 +31,13 @@ class AgentRunner:
         transport: Transport,
         settings: Settings,
         next_agent: str | None = None,
+        shutdown_monitor: ShutdownMonitor | None = None,
     ) -> None:
         """Initialise the runner with an agent, transport, and settings."""
         self._agent = agent
         self._transport = transport
         self._next_agent = next_agent
+        self._shutdown_monitor = shutdown_monitor
         self._max_retries = 3
         self._retry_backoff = 2.0
         self._poll_interval = settings.sqlite_poll_interval_seconds
@@ -125,6 +128,11 @@ class AgentRunner:
         self._log.info("agent_runner_started", next_agent=self._next_agent)
         try:
             while True:
+                if self._shutdown_monitor and self._shutdown_monitor.should_stop(
+                    self._agent.name
+                ):
+                    self._log.info("agent_runner_stop_requested")
+                    raise asyncio.CancelledError
                 processed = await self.run_once()
                 if not processed:
                     self._log.debug(

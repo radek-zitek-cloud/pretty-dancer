@@ -58,8 +58,9 @@ def send_command(
         from_agent="human",
         to_agent=agent_name,
         body=body,
-        **({"thread_id": resolved_thread_id} if resolved_thread_id else {}),
     )
+    if resolved_thread_id:
+        message.thread_id = resolved_thread_id
 
     asyncio.run(transport.send(message))
     typer.echo(f"Sent to {agent_name}. Thread: {message.thread_id}")

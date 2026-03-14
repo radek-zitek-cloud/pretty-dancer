@@ -13,6 +13,7 @@ from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
 from multiagent.core.agent import LLMAgent
 from multiagent.core.runner import AgentRunner
+from multiagent.core.shutdown import ShutdownMonitor
 from multiagent.logging import configure_logging
 from multiagent.transport import create_transport
 
@@ -40,6 +41,8 @@ async def _run(
 
     agent_config = configs[agent_name]
     transport = create_transport(settings)
+    monitor = ShutdownMonitor(settings.sqlite_db_path.parent)
+    monitor.clear(agent_name)
 
     settings.checkpointer_db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -48,10 +51,18 @@ async def _run(
     ) as checkpointer:
         agent = LLMAgent(agent_name, settings, checkpointer)
         runner = AgentRunner(
-            agent, transport, settings, next_agent=agent_config.next_agent
+            agent,
+            transport,
+            settings,
+            next_agent=agent_config.next_agent,
+            shutdown_monitor=monitor,
         )
         log.info("agent_starting", agent=agent_name, next_agent=agent_config.next_agent)
-        await runner.run_loop()
+        try:
+            await runner.run_loop()
+        finally:
+            monitor.clear(agent_name)
+            await transport.close()
 
 
 def run_command(
