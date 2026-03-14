@@ -160,86 +160,6 @@ class ThreadsPanel(Widget):
                 break
 
 
-class MessageRow(Static):
-    """A single message in the thread view. Click to expand/collapse."""
-
-    DEFAULT_CSS = """
-    MessageRow {
-        height: auto;
-        padding: 0;
-        margin: 0;
-        color: $text;
-        background: $surface;
-    }
-    MessageRow:hover {
-        background: $panel;
-    }
-    MessageRow.expanded {
-        background: $panel;
-        padding: 0 0 1 0;
-    }
-    """
-
-    def __init__(self, msg_data: dict[str, Any]) -> None:
-        super().__init__()
-        self._msg = msg_data
-        self._expanded = False
-        self._render_content()
-
-    @staticmethod
-    def _esc(text: str) -> str:
-        """Escape markup special characters in user content."""
-        return text.replace("[", r"\[")
-
-    def _render_content(self) -> None:
-        """Build the display text based on expanded state."""
-        from_a = str(self._msg.get("from_agent", "?"))
-        to_a = str(self._msg.get("to_agent", "?"))
-        body = str(self._msg.get("body", ""))
-
-        ts_raw = self._msg.get("created_at", "")
-        ts_str = ""
-        if ts_raw:
-            try:
-                dt = datetime.fromisoformat(str(ts_raw))
-                ts_str = dt.strftime("%H:%M:%S")
-            except (ValueError, TypeError):
-                ts_str = str(ts_raw)[:8]
-
-        unprocessed = self._msg.get("processed_at") is None
-        dot = " [yellow]●[/]" if unprocessed else ""
-
-        header = (
-            f"[bold]{self._esc(from_a):<10}[/]"
-            f" → "
-            f"{self._esc(to_a):<10}"
-        )
-
-        if self._expanded:
-            line = (
-                f"{header}  [dim]{ts_str}[/]{dot} [dim]▾[/]\n"
-                f"{self._esc(body)}"
-            )
-        else:
-            truncated = body.replace("\n", " ")
-            is_long = len(body) > 80 or "\n" in str(self._msg.get("body", ""))
-            if len(truncated) > 80:
-                truncated = truncated[:77] + "..."
-            indicator = " [dim]▸[/]" if is_long else ""
-            line = (
-                f"{header} {self._esc(truncated)}"
-                f"  [dim]{ts_str}[/]{dot}{indicator}"
-            )
-
-        self.update(line)
-
-    def on_click(self) -> None:
-        """Toggle expanded state."""
-        self._expanded = not self._expanded
-        self.set_class(self._expanded, "expanded")
-        self._render_content()
-
-
 class ThreadPanel(Widget):
     """Displays the message chain for the selected thread."""
 
@@ -258,43 +178,103 @@ class ThreadPanel(Widget):
         super().__init__()
         self._auto_scroll = True
         self._last_count = 0
-        self._last_thread_id: str | None = None
+        self._messages: list[dict[str, Any]] = []
+        self._expanded: set[int] = set()
         self.border_title = "Thread"
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="thread-scroll"):
-            yield Static("Select a thread", id="thread-placeholder")
+        yield VerticalScroll(
+            Static("Select a thread", id="thread-content"),
+            id="thread-scroll",
+        )
+
+    @staticmethod
+    def _esc(text: str) -> str:
+        """Escape markup special characters in user content."""
+        return text.replace("[", r"\[")
+
+    def _render_thread(self) -> None:
+        """Rebuild the full thread display."""
+        if not self._messages:
+            try:
+                self.query_one("#thread-content", Static).update(
+                    "No messages"
+                )
+            except Exception:
+                pass
+            return
+
+        lines: list[str] = []
+        for i, m in enumerate(self._messages):
+            from_a = str(m.get("from_agent", "?"))
+            to_a = str(m.get("to_agent", "?"))
+            body = str(m.get("body", ""))
+
+            ts_raw = m.get("created_at", "")
+            ts_str = ""
+            if ts_raw:
+                try:
+                    dt = datetime.fromisoformat(str(ts_raw))
+                    ts_str = dt.strftime("%H:%M:%S")
+                except (ValueError, TypeError):
+                    ts_str = str(ts_raw)[:8]
+
+            unprocessed = m.get("processed_at") is None
+            dot = " [yellow]●[/]" if unprocessed else ""
+
+            header = (
+                f"[bold]{self._esc(from_a):<10}[/]"
+                f" → "
+                f"{self._esc(to_a):<10}"
+            )
+
+            is_long = len(body) > 80 or "\n" in body
+
+            if i in self._expanded:
+                line = (
+                    f"{header}  [dim]{ts_str}[/]{dot}"
+                    f" [dim]▾[/]\n{self._esc(body)}"
+                )
+            else:
+                truncated = body.replace("\n", " ")
+                if len(truncated) > 80:
+                    truncated = truncated[:77] + "..."
+                indicator = " [dim]▸[/]" if is_long else ""
+                line = (
+                    f"{header} {self._esc(truncated)}"
+                    f"  [dim]{ts_str}[/]{dot}{indicator}"
+                )
+            lines.append(line)
+
+        rendered = "\n".join(lines)
+        try:
+            self.query_one("#thread-content", Static).update(rendered)
+        except Exception:
+            pass
 
     def update_messages(
         self, messages: list[dict[str, Any]], thread_id: str = ""
     ) -> None:
-        """Render the message chain as individual clickable rows."""
-        try:
-            scroll = self.query_one("#thread-scroll", VerticalScroll)
-        except Exception:
-            return
-
-        if not messages:
-            scroll.remove_children()
-            scroll.mount(Static("No messages", id="thread-placeholder"))
-            self._last_count = 0
-            self._last_thread_id = None
-            return
-
-        # Full rebuild on thread change, incremental on same thread
+        """Update the message list and re-render."""
         new_count = len(messages)
-        if thread_id != self._last_thread_id:
-            scroll.remove_children()
-            for m in messages:
-                scroll.mount(MessageRow(m))
-            self._last_thread_id = thread_id
-        elif new_count > self._last_count:
-            for m in messages[self._last_count:]:
-                scroll.mount(MessageRow(m))
+        self._messages = messages
+        self._render_thread()
 
         if new_count > self._last_count and self._auto_scroll:
-            scroll.scroll_end(animate=False)
+            try:
+                scroll = self.query_one("#thread-scroll", VerticalScroll)
+                scroll.scroll_end(animate=False)
+            except Exception:
+                pass
         self._last_count = new_count
+
+    def toggle_message(self, index: int) -> None:
+        """Expand or collapse a message by index."""
+        if index in self._expanded:
+            self._expanded.discard(index)
+        else:
+            self._expanded.add(index)
+        self._render_thread()
 
 
 class SendPanel(Widget):
