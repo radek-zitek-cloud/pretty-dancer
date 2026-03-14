@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from multiagent.config.agents import AgentConfig
+from multiagent.config.agents import AgentConfig, AgentsConfig
 
 
 @pytest.fixture
@@ -46,10 +46,13 @@ def _mock_start_deps() -> Any:
         mock_settings.return_value.agents_config_path = "agents.toml"
         mock_settings.return_value.checkpointer_db_path = MagicMock()
         mock_settings.return_value.checkpointer_db_path.parent.mkdir = MagicMock()
-        mock_configs.return_value = {
-            "researcher": AgentConfig(name="researcher", next_agent="critic"),
-            "critic": AgentConfig(name="critic"),
-        }
+        mock_configs.return_value = AgentsConfig(
+            agents={
+                "researcher": AgentConfig(name="researcher", next_agent="critic"),
+                "critic": AgentConfig(name="critic"),
+            },
+            routers={},
+        )
         yield {
             "runner_cls": mock_runner_cls,
             "runner_instance": mock_runner_instance,
@@ -85,7 +88,8 @@ class TestStartCommand:
         with (
             patch("multiagent.cli.start.load_settings") as mock_settings,
             patch(
-                "multiagent.cli.start.load_agents_config", return_value={}
+                "multiagent.cli.start.load_agents_config",
+                return_value=AgentsConfig(agents={}, routers={})
             ),
             patch(
                 "multiagent.cli.start.configure_logging",

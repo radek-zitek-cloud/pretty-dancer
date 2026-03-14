@@ -33,12 +33,12 @@ def send_command(
         thread_id: Optional existing thread UUID to continue.
     """
     settings = load_settings()
-    configs = load_agents_config(settings.agents_config_path)
+    agents_config = load_agents_config(settings.agents_config_path)
 
-    if agent_name not in configs:
+    if agent_name not in agents_config.agents:
         raise typer.BadParameter(
             f"Agent '{agent_name}' not found in {settings.agents_config_path}. "
-            f"Available: {', '.join(sorted(configs.keys()))}"
+            f"Available: {', '.join(sorted(agents_config.agents.keys()))}"
         )
 
     resolved_thread_id: str | None = None
