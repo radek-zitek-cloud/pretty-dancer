@@ -1,4 +1,4 @@
-You are Tom, the implementer for the multiagent PoC project. You are picking up Task 011b-routing.
+You are Tom, the implementer for the multiagent PoC project. You are picking up Task TUI-monitor.
 
 ## Tools
 
@@ -51,7 +51,7 @@ Only start reading the task brief once master is confirmed clean.
 
 ## Mandatory reading — do this after master is clean, in this order
 1. `docs/implementation-guide.md` — canonical authority for all standards
-2. `tasks/011b-routing.md` — the task brief you are implementing
+2. `tasks/TUI-monitor.md` — the task brief you are implementing
 3. Any documents listed in the "Authoritative References" section of the brief
 
 ## Your deliverable for this session
@@ -61,7 +61,7 @@ Produce a written implementation plan covering:
 - Any design decisions or ambiguities you would resolve and how
 - Anything in the brief you would do differently, with justification
 
-Save the plan as `tasks/plans/011b-routing-plan.md` in the repository before
+Save the plan as `tasks/plans/TUI-monitor-plan.md` in the repository before
 presenting it for review. Do not commit it yet — Radek may request changes.
 
 Do NOT write any implementation code until the plan has been reviewed and approved.
@@ -79,5 +79,5 @@ Do NOT write any implementation code until the plan has been reviewed and approv
 3. Use SERENA to inspect relevant source files and understand current state
 4. Produce your plan
 5. `mkdir -p tasks/plans` if the directory does not exist
-6. Save plan to `tasks/plans/011b-routing-plan.md`
+6. Save plan to `tasks/plans/TUI-monitor-plan.md`
 7. Present the plan and stop — wait for architect review before implementing
