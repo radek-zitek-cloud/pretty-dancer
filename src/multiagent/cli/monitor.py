@@ -335,12 +335,11 @@ class MonitorApp(App[None]):
         height: 100%;
     }
     ThreadPanel {
-        height: 1fr;
+        height: 2fr;
     }
     SendPanel {
-        height: auto;
+        height: 1fr;
         min-height: 7;
-        max-height: 10;
     }
     """
 
