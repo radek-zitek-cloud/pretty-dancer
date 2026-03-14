@@ -41,6 +41,9 @@ class AgentRunner:
         self._max_retries = 3
         self._retry_backoff = 2.0
         self._poll_interval = settings.sqlite_poll_interval_seconds
+        self._loop_threshold = settings.agent_loop_detection_threshold
+        self._max_messages = settings.agent_max_messages_per_thread
+        self._termination_warned = False
         self._log = structlog.get_logger().bind(agent=agent.name)
 
     @property
@@ -104,6 +107,23 @@ class AgentRunner:
         # Dynamic routing takes priority over static next_agent
         effective_next = run_result.next_agent or self._next_agent
         if effective_next:
+            if await self._check_loop_detected(
+                msg.thread_id, effective_next
+            ):
+                op_log.warning(
+                    "routing_loop_detected",
+                    recipient=effective_next,
+                    threshold=self._loop_threshold,
+                )
+                return True
+
+            if await self._check_max_messages(msg.thread_id):
+                op_log.warning(
+                    "max_messages_reached",
+                    count=self._max_messages,
+                )
+                return True
+
             await self._transport.send(Message(
                 from_agent=self._agent.name,
                 to_agent=effective_next,
@@ -115,6 +135,67 @@ class AgentRunner:
             op_log.info("message_forwarded", to_agent=effective_next)
 
         return True
+
+    def _has_transport_query(self, method: str) -> bool:
+        """Check if the transport supports a query method (duck-typing).
+
+        Logs a one-time WARNING if the method is missing, indicating
+        termination checks are unavailable for this transport type.
+        """
+        if hasattr(self._transport, method):
+            return True
+        if not self._termination_warned:
+            self._log.warning(
+                "termination_checks_unavailable",
+                reason=f"transport lacks '{method}' method",
+            )
+            self._termination_warned = True
+        return False
+
+    async def _check_loop_detected(
+        self,
+        thread_id: str,
+        proposed_recipient: str,
+    ) -> bool:
+        """Return True if dispatching would extend a self-routing loop.
+
+        Queries the transport for the N most recent messages on this thread.
+        If all N were sent by this agent to itself, a loop is detected.
+        """
+        if proposed_recipient != self._agent.name:
+            return False
+        if self._loop_threshold == 0:
+            return False
+        if not self._has_transport_query("thread_messages_tail"):
+            return False
+
+        tail = list[tuple[str, str]](
+            await self._transport.thread_messages_tail(  # type: ignore[union-attr]
+                thread_id, self._loop_threshold,
+            )
+        )
+        if len(tail) < self._loop_threshold:
+            return False
+
+        agent_name = self._agent.name
+        return all(
+            from_a == agent_name and to_a == agent_name
+            for from_a, to_a in tail
+        )
+
+    async def _check_max_messages(self, thread_id: str) -> bool:
+        """Return True if the thread has reached the message ceiling."""
+        if self._max_messages == 0:
+            return False
+        if not self._has_transport_query("thread_message_count"):
+            return False
+
+        count = int(
+            await self._transport.thread_message_count(  # type: ignore[union-attr]
+                thread_id,
+            )
+        )
+        return count >= self._max_messages
 
     async def run_loop(self) -> None:
         """Run the agent polling loop indefinitely.
