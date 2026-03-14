@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false
 """Agent and router wiring configuration loaded from TOML.
 
 Reads agents.toml to determine which agents exist, how they are chained,
@@ -34,7 +35,7 @@ class RouterConfig:
 
     name: str
     type: str
-    routes: dict[str, list[str]] = field(default_factory=dict)
+    routes: dict[str, list[str]] = field(default_factory=lambda: dict[str, list[str]]())
     default: str = "human"
     prompt_path: Path | None = None
     model: str = ""
@@ -152,7 +153,8 @@ def load_agents_config(config_path: Path) -> AgentsConfig:
             routes: dict[str, list[str]] = {}
             for dest, triggers in raw_routes.items():
                 if isinstance(triggers, list):
-                    routes[dest] = [str(t) for t in triggers]
+                    trigger_list: list[Any] = triggers
+                    routes[dest] = [str(t) for t in trigger_list]
                 else:
                     routes[dest] = [str(triggers)]
 

@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportCallIssue=false
 """Dynamic routing for agent output.
 
 Provides keyword-based and LLM-based routers that determine the next
@@ -37,6 +38,7 @@ class KeywordRouter:
     """
 
     def __init__(self, config: RouterConfig) -> None:
+        """Initialise the keyword router with its configuration."""
         self._config = config
         self._log = structlog.get_logger().bind(router=config.name)
 
@@ -77,13 +79,14 @@ class LLMRouter:
     """
 
     def __init__(self, config: RouterConfig, settings: Settings) -> None:
+        """Initialise the LLM router with config and settings for API credentials."""
         self._config = config
         self._log = structlog.get_logger().bind(router=config.name)
 
         model = config.model if config.model else settings.llm_model
         self._llm = ChatOpenAI(
             model=model,
-            max_tokens=10,
+            max_tokens=10,  # type: ignore[arg-type]
             timeout=settings.llm_timeout_seconds,
             api_key=settings.openrouter_api_key,  # type: ignore[arg-type]
             base_url=settings.openrouter_base_url,
@@ -117,8 +120,8 @@ class LLMRouter:
         ]
 
         response = await self._llm.ainvoke(messages)
-        content = response.content
-        key = content.strip() if isinstance(content, str) else str(content).strip()
+        raw_content = response.content  # str | list[str | dict]
+        key: str = raw_content.strip() if isinstance(raw_content, str) else str(raw_content).strip()
 
         if key in self._valid_keys:
             self._log.debug("llm_route_matched", key=key)
