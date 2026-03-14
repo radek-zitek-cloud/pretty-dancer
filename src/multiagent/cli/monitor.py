@@ -581,23 +581,34 @@ class MonitorApp(App[None]):
         self.query_one(ThreadPanel).update_messages(messages, tid)
         self.query_one(ThreadPanel).border_title = f"Thread {tid[:8]}"
 
-        # Pre-fill send panel
-        if messages:
-            # Find last message to human for auto-reply target
-            reply_to = ""
-            for m in reversed(messages):
-                if str(m.get("to_agent")) == "human":
-                    reply_to = str(m.get("from_agent", ""))
-                    break
-            if not reply_to:
-                reply_to = str(messages[-1].get("from_agent", ""))
-            self.query_one(SendPanel).prefill(reply_to, tid)
-
     async def on_option_list_option_highlighted(
         self, event: OptionList.OptionHighlighted
     ) -> None:
-        """When a thread is selected, load its messages."""
+        """When a thread is selected, load its messages and prefill send."""
         await self._load_selected_thread()
+        await self._prefill_send_panel()
+
+    async def _prefill_send_panel(self) -> None:
+        """Pre-fill the send panel from the selected thread."""
+        if not self._agents_conn:
+            return
+        tid = self.query_one(ThreadsPanel).selected_thread_id
+        if not tid:
+            return
+        cursor = await self._agents_conn.execute(
+            "SELECT from_agent, to_agent FROM messages "
+            "WHERE thread_id = ? ORDER BY created_at DESC",
+            (tid,),
+        )
+        rows = list(await cursor.fetchall())
+        reply_to = ""
+        for r in rows:
+            if str(r["to_agent"]) == "human":
+                reply_to = str(r["from_agent"])
+                break
+        if not reply_to and rows:
+            reply_to = str(rows[0]["from_agent"])
+        self.query_one(SendPanel).prefill(reply_to, tid)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle Enter in the send body input."""
@@ -622,6 +633,8 @@ class MonitorApp(App[None]):
         if self._transport:
             await self._transport.send(msg)
             send.clear_body()
+            # Release focus so polling resumes normally
+            self.set_focus(None)
             await self._refresh_all()
 
     async def action_refresh(self) -> None:
