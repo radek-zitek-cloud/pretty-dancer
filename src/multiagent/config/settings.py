@@ -116,7 +116,7 @@ class Settings(BaseSettings):
         "anthropic/claude-sonnet-4-5",
         description="OpenRouter model routing string. Format: provider/model-name.",
     )
-    llm_max_tokens: int = Field(1024, ge=1, le=8192, description="Maximum response tokens.")
+    llm_max_tokens: int = Field(16384, ge=1, le=1000000, description="Maximum response tokens.")
     llm_timeout_seconds: float = Field(30.0, gt=0, description="LLM call timeout in seconds.")
 
     # Prompts
