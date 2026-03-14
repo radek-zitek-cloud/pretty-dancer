@@ -277,6 +277,16 @@ class ThreadPanel(Widget):
             self._expanded.add(index)
         self._render_thread()
 
+    def expand_all(self) -> None:
+        """Expand all messages."""
+        self._expanded = set(range(len(self._messages)))
+        self._render_thread()
+
+    def collapse_all(self) -> None:
+        """Collapse all messages."""
+        self._expanded.clear()
+        self._render_thread()
+
 
 class SendPanel(Widget):
     """Inline message send form."""
@@ -362,7 +372,7 @@ class MonitorApp(App[None]):
         height: 1fr;
     }
     #left-col {
-        width: 28;
+        width: 34;
         height: 100%;
     }
     #right-col {
@@ -381,6 +391,8 @@ class MonitorApp(App[None]):
     BINDINGS = [  # noqa: RUF012  # type: ignore[assignment]
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
+        Binding("e", "expand_all", "Expand all"),
+        Binding("c", "collapse_all", "Collapse all"),
         Binding("tab", "focus_next", "Next field", show=False),
     ]
 
@@ -615,6 +627,14 @@ class MonitorApp(App[None]):
     async def action_refresh(self) -> None:
         """Manual refresh."""
         await self._refresh_all()
+
+    def action_expand_all(self) -> None:
+        """Expand all messages in the thread panel."""
+        self.query_one(ThreadPanel).expand_all()
+
+    def action_collapse_all(self) -> None:
+        """Collapse all messages in the thread panel."""
+        self.query_one(ThreadPanel).collapse_all()
 
     async def _refresh_header_cost(self) -> None:
         """Update the header subtitle with total cost."""
