@@ -257,7 +257,12 @@ checkpoints raise a validation error, wipe `data/checkpoints.db` and document
 the incompatibility.
 
 **Action:** Add a manual verification step after Phase 3 — run an existing
-thread before smoke test. Outcome documented below after implementation.
+thread before smoke test.
+
+**Outcome:** Verified. Old checkpoints load successfully. The `next_agent`
+field defaults to `None` for existing checkpoint data. LangGraph's
+`AsyncSqliteSaver.aget()` returns `channel_values` that include `messages`
+(10 messages) and `next_agent: None`. No database wipe needed.
 
 ### Feedback 2: `RunResult.response` extraction — type guard required
 
