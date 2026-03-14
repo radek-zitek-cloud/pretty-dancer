@@ -121,8 +121,13 @@ def mock_llm(mocker: MockerFixture, mock_llm_response: str) -> AsyncMock:
                 "total_tokens": 30,
             },
             response_metadata={
-                "input_unit_price": 0.000003,
-                "output_unit_price": 0.000015,
+                "token_usage": {
+                    "cost": 0.000330,
+                    "cost_details": {
+                        "upstream_inference_prompt_cost": 0.000030,
+                        "upstream_inference_completions_cost": 0.000300,
+                    },
+                },
             },
         )
     )

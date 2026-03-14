@@ -111,12 +111,15 @@ class LLMAgent:
             total_tokens = int(usage.get("total_tokens") or 0)
 
             metadata = response.response_metadata or {}
-            input_unit_price = float(metadata.get("input_unit_price", 0.0))
-            output_unit_price = float(metadata.get("output_unit_price", 0.0))
-            cost_usd = (
-                input_tokens * input_unit_price
-                + output_tokens * output_unit_price
+            token_usage = metadata.get("token_usage") or {}
+            cost_details = token_usage.get("cost_details") or {}
+            cost_usd = float(token_usage.get("cost") or 0.0)
+            input_cost = float(cost_details.get("upstream_inference_prompt_cost") or 0.0)
+            output_cost = float(
+                cost_details.get("upstream_inference_completions_cost") or 0.0
             )
+            input_unit_price = (input_cost / input_tokens) if input_tokens else 0.0
+            output_unit_price = (output_cost / output_tokens) if output_tokens else 0.0
 
             self._log.debug(
                 "llm_usage",

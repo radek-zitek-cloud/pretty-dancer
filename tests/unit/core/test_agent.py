@@ -202,8 +202,7 @@ class TestLLMAgentCostTracking:
         assert entry.total_tokens == 30
         assert entry.input_unit_price == pytest.approx(0.000003)
         assert entry.output_unit_price == pytest.approx(0.000015)
-        expected_cost = 10 * 0.000003 + 20 * 0.000015
-        assert entry.cost_usd == pytest.approx(expected_cost)
+        assert entry.cost_usd == pytest.approx(0.000330)
 
     async def test_cost_recording_failure_does_not_fail_agent(
         self, test_settings: Settings, mock_llm: AsyncMock, checkpointer: MemorySaver,
