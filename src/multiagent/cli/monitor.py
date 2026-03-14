@@ -249,9 +249,6 @@ class SendPanel(Widget):
     DEFAULT_CSS = """
     SendPanel {
         border: solid $secondary;
-        height: auto;
-        min-height: 7;
-        max-height: 10;
         padding: 0 1;
     }
     SendPanel .send-row {
@@ -326,21 +323,24 @@ class MonitorApp(App[None]):
 
     CSS = """
     #main-layout {
-        layout: grid;
-        grid-size: 2;
-        grid-columns: 1fr 3fr;
-        grid-rows: 1fr 1fr;
-        height: 100%;
+        layout: horizontal;
+        height: 1fr;
     }
     #left-col {
-        row-span: 2;
+        width: 28;
         height: 100%;
     }
-    #right-top {
+    #right-col {
+        width: 1fr;
         height: 100%;
     }
-    #right-bottom {
+    ThreadPanel {
+        height: 1fr;
+    }
+    SendPanel {
         height: auto;
+        min-height: 7;
+        max-height: 10;
     }
     """
 
@@ -376,7 +376,7 @@ class MonitorApp(App[None]):
             with Vertical(id="left-col"):
                 yield AgentsPanel(self._agent_names, self._poll_interval)
                 yield ThreadsPanel()
-            with Vertical():
+            with Vertical(id="right-col"):
                 yield ThreadPanel()
                 yield SendPanel()
         yield Footer()
