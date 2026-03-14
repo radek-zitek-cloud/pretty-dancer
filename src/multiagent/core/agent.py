@@ -177,10 +177,12 @@ class LLMAgent:
                     output_chars=len(output),
                 )
 
-            thread_id = config["configurable"]["thread_id"]
+            # Strip agent-name namespace prefix for cost recording
+            raw_tid = str(config["configurable"]["thread_id"])
+            cost_tid = raw_tid.split(":", 1)[1] if ":" in raw_tid else raw_tid
             entry = CostEntry(
                 timestamp=datetime.now(UTC).isoformat(),
-                thread_id=str(thread_id),
+                thread_id=cost_tid,
                 agent=self.name,
                 model=self._settings.llm_model,
                 input_tokens=input_tokens,
@@ -241,7 +243,11 @@ class LLMAgent:
         Raises:
             AgentLLMError: If the LLM API call fails.
         """
-        config = {"configurable": {"thread_id": thread_id}}
+        # Namespace thread_id per agent to isolate checkpoint state.
+        # Without this, a routing decision (next_agent) set by one agent
+        # leaks into another agent's state on the same thread.
+        namespaced_thread = f"{self.name}:{thread_id}"
+        config = {"configurable": {"thread_id": namespaced_thread}}
         try:
             result = await self._graph.ainvoke(
                 {"messages": [HumanMessage(content=input_text)]},

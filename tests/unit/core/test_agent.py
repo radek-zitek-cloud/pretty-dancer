@@ -312,3 +312,61 @@ class TestLLMAgentRouting:
         # mock_llm returns "Mocked LLM response for testing." — no trigger match
         result = await agent.run("test input", "thread-default")
         assert result.next_agent == "human"
+
+
+class TestLLMAgentCheckpointIsolation:
+    async def test_agents_on_same_thread_have_independent_checkpointer_state(
+        self, test_settings: Settings, checkpointer: MemorySaver,
+        mock_cost_ledger: AsyncMock, mocker: MockerFixture,
+    ) -> None:
+        """Two agents sharing a checkpointer and thread_id must not leak
+        next_agent state. Regression test for the writer self-loop bug where
+        a shared checkpoint_ns caused the editor's routing decision
+        (next_agent='writer') to persist into the writer's graph state."""
+        from langchain_core.messages import AIMessage
+
+        router_config = RouterConfig(
+            name="test_gate",
+            type="keyword",
+            routes={"writer": ["WRITER BRIEF"]},
+            default="human",
+        )
+        router = KeywordRouter(router_config)
+
+        response_with_trigger = AsyncMock(
+            return_value=AIMessage(
+                content="Here is the WRITER BRIEF for the article",
+                usage_metadata={
+                    "input_tokens": 10, "output_tokens": 20, "total_tokens": 30,
+                },
+                response_metadata={},
+            )
+        )
+        mocker.patch("langchain_openai.ChatOpenAI.ainvoke", side_effect=response_with_trigger)
+
+        agent_a = LLMAgent(
+            "researcher", test_settings, checkpointer, mock_cost_ledger,
+            router=router,
+        )
+        result_a = await agent_a.run("Write about physics", "shared-thread")
+        assert result_a.next_agent == "writer"
+
+        plain_response = AsyncMock(
+            return_value=AIMessage(
+                content="Here is the article about physics.",
+                usage_metadata={
+                    "input_tokens": 10, "output_tokens": 20, "total_tokens": 30,
+                },
+                response_metadata={},
+            )
+        )
+        mocker.patch("langchain_openai.ChatOpenAI.ainvoke", side_effect=plain_response)
+
+        agent_b = LLMAgent(
+            "critic", test_settings, checkpointer, mock_cost_ledger,
+        )
+        result_b = await agent_b.run("Edit the article", "shared-thread")
+        assert result_b.next_agent is None, (
+            f"Agent B inherited next_agent='{result_b.next_agent}' from Agent A's "
+            f"checkpoint — checkpoint_ns isolation is broken"
+        )
