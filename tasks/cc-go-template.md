@@ -28,7 +28,7 @@ The second form is cleaner — use that.
 ```bash
 git checkout master
 git pull origin master
-git worktree add ../pretty-nurse-<<<BRANCH_SLUG>>> feature/<<<BRANCH_SLUG>>>
+git worktree add ../pretty-dancer-<<<BRANCH_SLUG>>> feature/<<<BRANCH_SLUG>>>
 cd ../pretty-nurse-<<<BRANCH_SLUG>>>
 ```
 
