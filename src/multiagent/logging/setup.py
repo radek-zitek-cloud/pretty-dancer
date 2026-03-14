@@ -166,6 +166,19 @@ def configure_logging(
         json_handler.setLevel(settings.log_json_file_level.upper())
         root_logger.addHandler(json_handler)
 
+    # Suppress noisy third-party loggers that flood DEBUG with internal
+    # operations (aiosqlite SQL traces, httpx request lifecycle, etc.)
+    for noisy_logger in (
+        "aiosqlite",
+        "httpx",
+        "httpcore",
+        "hpack",
+        "openai",
+        "langchain",
+        "langsmith",
+    ):
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+
     return human_log_path, json_log_path
 
 
