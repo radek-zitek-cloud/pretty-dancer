@@ -447,10 +447,7 @@ class TestLLMAgentTools:
         mock_client_cls = mocker.patch(
             "multiagent.core.agent.MultiServerMCPClient"
         )
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=mock_client
-        )
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
 
         # Mock ToolNode to return a tool result
         mock_tool_node = mocker.patch(
@@ -523,10 +520,7 @@ class TestLLMAgentTools:
         mock_client_cls = mocker.patch(
             "multiagent.core.agent.MultiServerMCPClient"
         )
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=mock_client
-        )
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
 
         mock_tool_node = mocker.patch("multiagent.core.agent.ToolNode")
         mock_tool_node.return_value = mocker.MagicMock(

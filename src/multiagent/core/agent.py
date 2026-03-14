@@ -331,8 +331,8 @@ class LLMAgent:
             }
 
         self._log.debug("mcp_client_starting", servers=len(self._tool_configs))
-        async with MultiServerMCPClient(server_map_named) as client:  # type: ignore[reportGeneralTypeIssues]
-            tools = await client.get_tools()
-            self._log.debug("mcp_tools_loaded", tool_count=len(tools))
-            graph = self._build_graph(tools=tools)
-            return await self._invoke_graph(graph, input_text, thread_id)
+        client = MultiServerMCPClient(server_map_named)
+        tools = await client.get_tools()
+        self._log.debug("mcp_tools_loaded", tool_count=len(tools))
+        graph = self._build_graph(tools=tools)
+        return await self._invoke_graph(graph, input_text, thread_id)
