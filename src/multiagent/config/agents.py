@@ -1,17 +1,43 @@
-"""Agent wiring configuration loaded from TOML.
+"""Agent and router wiring configuration loaded from TOML.
 
-Reads agents.toml to determine which agents exist and how they are chained.
+Reads agents.toml to determine which agents exist, how they are chained,
+and what routers are available for dynamic routing decisions.
 Uses stdlib tomllib — no third-party dependency required.
 """
 
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from multiagent.exceptions import InvalidConfigurationError
+
+
+@dataclass(frozen=True)
+class RouterConfig:
+    """Configuration for a single router loaded from agents.toml.
+
+    Attributes:
+        name: Unique router identifier matching the [routers.<name>] section.
+        type: Router type — "keyword" or "llm".
+        routes: Mapping of destination agent name to trigger data.
+            For keyword type: destination → list of trigger strings.
+            For llm type: destination → route key string.
+        default: Fallback destination when no route matches.
+        prompt_path: Path to the LLM classifier prompt file. Required
+            for llm type, None for keyword type.
+        model: LLM model override for llm type. Empty string means
+            use the default model from settings.
+    """
+
+    name: str
+    type: str
+    routes: dict[str, list[str]] = field(default_factory=dict)
+    default: str = "human"
+    prompt_path: Path | None = None
+    model: str = ""
 
 
 @dataclass(frozen=True)
@@ -23,31 +49,50 @@ class AgentConfig:
             receive messages from transport.
         next_agent: Name of the agent to forward responses to. None
             means this is a terminal agent — responses are not forwarded.
+            Mutually exclusive with router.
+        router: Name of the router to use for dynamic routing. None
+            means static routing via next_agent. Mutually exclusive
+            with next_agent.
     """
 
     name: str
     next_agent: str | None = None
+    router: str | None = None
 
 
-def load_agents_config(config_path: Path) -> dict[str, AgentConfig]:
-    """Load agent wiring configuration from a TOML file.
+@dataclass(frozen=True)
+class AgentsConfig:
+    """Complete agent and router configuration from agents.toml.
 
-    Reads the agents.toml file and returns a mapping of agent name to
-    AgentConfig. The file must exist and contain a valid [agents] table.
+    Attributes:
+        agents: Mapping of agent name to AgentConfig.
+        routers: Mapping of router name to RouterConfig.
+    """
 
-    Note: circular chains (e.g. A → B → A) are not validated at load time.
-    They are a configuration error that surfaces at runtime.
+    agents: dict[str, AgentConfig]
+    routers: dict[str, RouterConfig]
+
+
+def load_agents_config(config_path: Path) -> AgentsConfig:
+    """Load agent and router configuration from a TOML file.
+
+    Reads the agents.toml file and returns an AgentsConfig containing
+    both agent wiring and router definitions. The file must exist and
+    contain a valid [agents] table. The [routers] table is optional.
+
+    Validates that no agent has both next_agent and router set — these
+    are mutually exclusive routing strategies.
 
     Args:
         config_path: Path to the agents TOML configuration file.
 
     Returns:
-        Dict mapping agent name (str) to AgentConfig. Keys are agent names
-        as declared in the [agents.<name>] sections.
+        AgentsConfig with agents and routers dicts populated.
 
     Raises:
-        InvalidConfigurationError: If the file is missing, malformed, or
-            contains no [agents] table.
+        InvalidConfigurationError: If the file is missing, malformed,
+            contains no [agents] table, or has invalid configuration
+            (e.g. agent with both next_agent and router).
     """
     try:
         raw = config_path.read_bytes()
@@ -75,11 +120,58 @@ def load_agents_config(config_path: Path) -> dict[str, AgentConfig]:
 
     agents_table: dict[str, dict[str, Any]] = agents_raw  # type: ignore[assignment]
 
-    result: dict[str, AgentConfig] = {}
+    agents: dict[str, AgentConfig] = {}
     for agent_name, section in agents_table.items():
         next_agent: str | None = section.get("next_agent")
-        result[agent_name] = AgentConfig(
+        router: str | None = section.get("router")
+
+        if next_agent and router:
+            raise InvalidConfigurationError(
+                f"Agent '{agent_name}' has both next_agent and router — "
+                f"these are mutually exclusive"
+            )
+
+        agents[agent_name] = AgentConfig(
             name=agent_name,
             next_agent=next_agent,
+            router=router,
         )
-    return result
+
+    routers: dict[str, RouterConfig] = {}
+    routers_raw: object = data.get("routers")
+    if routers_raw and isinstance(routers_raw, dict):
+        routers_table: dict[str, dict[str, Any]] = routers_raw  # type: ignore[assignment]
+        for router_name, section in routers_table.items():
+            router_type: str = section.get("type", "")
+            if not router_type:
+                raise InvalidConfigurationError(
+                    f"Router '{router_name}' must have a 'type' field"
+                )
+
+            raw_routes: dict[str, Any] = section.get("routes", {})
+            routes: dict[str, list[str]] = {}
+            for dest, triggers in raw_routes.items():
+                if isinstance(triggers, list):
+                    routes[dest] = [str(t) for t in triggers]
+                else:
+                    routes[dest] = [str(triggers)]
+
+            default: str = section.get("default", "human")
+
+            prompt_path: Path | None = None
+            raw_prompt: str | None = section.get("prompt")
+            if raw_prompt:
+                prompt_path = Path(raw_prompt)
+
+            model: str = section.get("model", "")
+
+            routers[router_name] = RouterConfig(
+                name=router_name,
+                type=router_type,
+                routes=routes,
+                default=default,
+                prompt_path=prompt_path,
+                model=model,
+            )
+
+    return AgentsConfig(agents=agents, routers=routers)
