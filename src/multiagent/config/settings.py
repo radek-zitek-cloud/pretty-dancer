@@ -136,6 +136,14 @@ class Settings(BaseSettings):
         "Separate from the message transport database.",
     )
 
+    # Cost tracking
+    cost_db_path: Path = Field(
+        Path("data/costs.db"),
+        description="Path to the cost ledger SQLite database. "
+        "Records per-call token counts and USD cost. "
+        "Created on first run — no manual setup required.",
+    )
+
     # Hello World test configuration
     greeting_message: str = Field(
         "Hello from multiagent",

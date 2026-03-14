@@ -43,6 +43,7 @@ def test_settings() -> Settings:
         prompts_dir=Path("tests/fixtures/prompts"),  # type: ignore[call-arg]
         agents_config_path=Path("tests/fixtures/agents.toml"),  # type: ignore[call-arg]
         checkpointer_db_path=Path(":memory:"),  # type: ignore[call-arg]
+        cost_db_path=Path(":memory:"),  # type: ignore[call-arg]
     )
 
 
