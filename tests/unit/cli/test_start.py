@@ -1,7 +1,9 @@
+# pyright: reportUnusedFunction=false
 """Tests for the ``multiagent start`` command."""
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,7 +12,7 @@ from multiagent.config.agents import AgentConfig
 
 
 @pytest.fixture
-def _mock_start_deps():
+def _mock_start_deps() -> Any:
     """Mock all external dependencies for start_command / _start."""
     mock_transport = AsyncMock()
 
@@ -57,13 +59,15 @@ def _mock_start_deps():
 
 class TestStartCommand:
     @pytest.mark.usefixtures("_mock_start_deps")
-    def test_starts_all_agents_from_config(self, _mock_start_deps: dict) -> None:  # type: ignore[type-arg]
+    def test_starts_all_agents_from_config(
+        self, _mock_start_deps: Any
+    ) -> None:
         """run_loop is called once per agent defined in config."""
         from multiagent.cli.start import start_command
 
         start_command()
 
-        runner_instance = _mock_start_deps["runner_instance"]
+        runner_instance: MagicMock = _mock_start_deps["runner_instance"]
         # run_loop should be called once per agent (2 agents in fixture)
         assert runner_instance.run_loop.call_count == 2
 
@@ -103,7 +107,7 @@ class TestStartCommand:
 
     @pytest.mark.usefixtures("_mock_start_deps")
     def test_logs_cluster_starting_with_agent_names(
-        self, _mock_start_deps: dict  # type: ignore[type-arg]
+        self, _mock_start_deps: Any
     ) -> None:
         """cluster_starting log event contains all agent names."""
         with patch("multiagent.cli.start.structlog") as mock_structlog:
