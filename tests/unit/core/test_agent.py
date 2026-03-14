@@ -1,4 +1,4 @@
-# pyright: reportPrivateUsage=false
+# pyright: reportPrivateUsage=false, reportUnknownMemberType=false
 from pathlib import Path
 from unittest.mock import AsyncMock
 

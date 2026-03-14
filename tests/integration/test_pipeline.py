@@ -1,10 +1,12 @@
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
 from multiagent.config.settings import Settings
 from multiagent.core.agent import LLMAgent
+from multiagent.core.costs import CostLedger
 from multiagent.core.runner import AgentRunner
 from multiagent.transport.base import Message
 from multiagent.transport.sqlite import SQLiteTransport
@@ -55,8 +57,10 @@ async def test_researcher_critic_pipeline(
     This test makes two real LLM API calls.
     """
     checkpointer = MemorySaver()
-    researcher = LLMAgent("researcher", integration_settings, checkpointer)
-    critic = LLMAgent("critic", integration_settings, checkpointer)
+    cost_ledger = AsyncMock(spec=CostLedger)
+    cost_ledger.record = AsyncMock()
+    researcher = LLMAgent("researcher", integration_settings, checkpointer, cost_ledger)
+    critic = LLMAgent("critic", integration_settings, checkpointer, cost_ledger)
 
     researcher_runner = AgentRunner(
         researcher, shared_transport, integration_settings, next_agent="critic"
@@ -95,8 +99,10 @@ async def test_pipeline_thread_continuity(
     chain — a structural correctness requirement, not an LLM content check.
     """
     checkpointer = MemorySaver()
-    researcher = LLMAgent("researcher", integration_settings, checkpointer)
-    critic = LLMAgent("critic", integration_settings, checkpointer)
+    cost_ledger = AsyncMock(spec=CostLedger)
+    cost_ledger.record = AsyncMock()
+    researcher = LLMAgent("researcher", integration_settings, checkpointer, cost_ledger)
+    critic = LLMAgent("critic", integration_settings, checkpointer, cost_ledger)
 
     researcher_runner = AgentRunner(
         researcher, shared_transport, integration_settings, next_agent="critic"
@@ -133,7 +139,9 @@ async def test_history_accumulates_across_turns(
     This test makes two real LLM API calls.
     """
     checkpointer = MemorySaver()
-    researcher = LLMAgent("researcher", integration_settings, checkpointer)
+    cost_ledger = AsyncMock(spec=CostLedger)
+    cost_ledger.record = AsyncMock()
+    researcher = LLMAgent("researcher", integration_settings, checkpointer, cost_ledger)
     runner = AgentRunner(researcher, shared_transport, integration_settings, next_agent=None)
 
     seed1 = Message(from_agent="human", to_agent="researcher", body="What is quantum entanglement?")

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownMemberType=false
 from __future__ import annotations
 
 import sqlite3
@@ -47,9 +48,9 @@ class TestCostLedger:
         db = tmp_path / "costs.db"
         async with CostLedger(db) as ledger:
             # Close the connection to force a failure
-            if ledger._conn:  # noqa: SLF001
-                await ledger._conn.close()  # noqa: SLF001
-                ledger._conn = None  # noqa: SLF001
+            if ledger._conn:
+                await ledger._conn.close()
+                ledger._conn = None
             # Should not raise
             await ledger.record(SAMPLE_ENTRY)
 

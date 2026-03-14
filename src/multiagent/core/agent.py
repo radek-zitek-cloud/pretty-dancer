@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnusedImport=false, reportUnknownArgumentType=false, reportCallIssue=false, reportUnknownVariableType=false, reportArgumentType=false
+# pyright: reportUnknownMemberType=false, reportUnusedImport=false, reportUnknownArgumentType=false, reportCallIssue=false, reportUnknownVariableType=false, reportArgumentType=false, reportTypedDictNotRequiredAccess=false, reportUnknownParameterType=false, reportMissingTypeArgument=false
 """LLMAgent — transport-agnostic LLM wrapper with LangGraph."""
 
 from __future__ import annotations
@@ -27,7 +27,13 @@ class LLMAgent:
     no transport, no side effects beyond the LLM call.
     """
 
-    def __init__(self, name: str, settings: Settings, checkpointer: BaseCheckpointSaver, cost_ledger: CostLedger) -> None:  # type: ignore[type-arg]
+    def __init__(  # type: ignore[type-arg]
+        self,
+        name: str,
+        settings: Settings,
+        checkpointer: BaseCheckpointSaver,
+        cost_ledger: CostLedger,
+    ) -> None:
         """Initialise the agent with a name, settings, checkpointer, and cost ledger."""
         self.name = name
         self._settings = settings

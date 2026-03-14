@@ -132,6 +132,18 @@ compare log1 log2:
 runs:
     @ls -lt logs/*.jsonl 2>/dev/null || echo "No run logs found in logs/"
 
+# Show cost summary by experiment
+costs:
+    uv run python scripts/show_costs.py
+
+# Show cost breakdown by agent
+costs-by-agent:
+    uv run python scripts/show_costs.py --by-agent
+
+# Show cost breakdown by model
+costs-by-model:
+    uv run python scripts/show_costs.py --by-model
+
 # Maintenance
 clean:
     find . -type d -name __pycache__ -exec rm -rf {} +
