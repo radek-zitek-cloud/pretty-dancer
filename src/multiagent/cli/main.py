@@ -1,8 +1,9 @@
 """CLI entry point for the multiagent system.
 
 Commands:
-    run  — Start a named agent and poll for messages.
-    send — Inject a message into the transport for a named agent.
+    run   — Start a named agent and poll for messages.
+    send  — Inject a message into the transport for a named agent.
+    start — Start all agents defined in agents.toml concurrently.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import typer
 
 from multiagent.cli.run import run_command
 from multiagent.cli.send import send_command
+from multiagent.cli.start import start_command
 
 app = typer.Typer(
     name="multiagent",
@@ -23,6 +25,7 @@ app = typer.Typer(
 
 app.command(name="run")(run_command)
 app.command(name="send")(send_command)
+app.command(name="start")(start_command)
 
 
 def main() -> None:
