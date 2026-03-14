@@ -142,6 +142,37 @@ def _render_cost_footer(console: Console, thread_id: str, cost_db_path: Path | N
     console.print(table)
 
 
+def _build_agent_cost_lookup(
+    thread_id: str, cost_db_path: Path | None
+) -> dict[str, dict[str, object]]:
+    """Build a per-agent cost summary dict for the thread.
+
+    Returns {agent_name: {calls, input_tokens, output_tokens, total_tokens, cost_usd}}.
+    """
+    if cost_db_path is None or not cost_db_path.exists():
+        return {}
+    try:
+        conn = sqlite3.connect(str(cost_db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(COST_SUMMARY_QUERY, (thread_id,)).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return {}
+
+    lookup: dict[str, dict[str, object]] = {}
+    for row in rows:
+        lookup[str(row["agent"])] = {
+            "calls": int(row["calls"]),
+            "input_tokens": int(row["input_tokens"]),
+            "output_tokens": int(row["output_tokens"]),
+            "total_tokens": int(row["total_tokens"]),
+            "cost_usd": float(row["cost_usd"]),
+        }
+    return lookup
+
+
 def main() -> None:
     """Entry point for show_thread script."""
     parser = argparse.ArgumentParser(description="Display a conversation thread from SQLite.")
@@ -179,36 +210,53 @@ def main() -> None:
     # Header panel
     first_ts = rows[0]["created_at"]
     last_ts = rows[-1]["created_at"]
+    participants = sorted({row["from_agent"] for row in rows} | {row["to_agent"] for row in rows})
     console.print(
         Panel(
             f"Thread: {args.thread_id}\n"
             f"Messages: {len(rows)}\n"
+            f"Participants: {', '.join(participants)}\n"
             f"Time range: {first_ts} → {last_ts}",
             title="Thread Summary",
             border_style="bright_white",
         )
     )
 
+    # Build per-agent cost lookup from cost_ledger (keyed by agent name)
+    cost_db_path = _load_cost_db_path()
+    agent_costs = _build_agent_cost_lookup(args.thread_id, cost_db_path)
+
     # Message panels
     for row in rows:
         from_agent = row["from_agent"]
         to_agent = row["to_agent"]
         colour = AGENT_COLOURS.get(from_agent, "white")
-        title = f"[{from_agent}] → [{to_agent}]  |  {row['created_at']}  |  id={row['id']}"
+        title = f"{from_agent} → {to_agent}  |  {row['created_at']}  |  id={row['id']}"
 
         processed = row["processed_at"]
         status = processed if processed else "[red][PENDING][/red]"
+
+        # Build subtitle with cost info if this agent has cost data
+        subtitle_parts: list[str] = []
+        if from_agent in agent_costs:
+            ac = agent_costs[from_agent]
+            subtitle_parts.append(
+                f"tokens: {ac['input_tokens']}→{ac['output_tokens']} "
+                f"({ac['total_tokens']} total)  |  "
+                f"cost: ${ac['cost_usd']:.4f}  |  "
+                f"calls: {ac['calls']}"
+            )
 
         console.print(
             Panel(
                 f"{row['body']}\n\n{status}",
                 title=title,
+                subtitle=" | ".join(subtitle_parts) if subtitle_parts else None,
                 border_style=colour,
             )
         )
 
     # Cost summary footer
-    cost_db_path = _load_cost_db_path()
     _render_cost_footer(console, args.thread_id, cost_db_path)
 
 
