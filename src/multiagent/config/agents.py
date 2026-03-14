@@ -59,6 +59,7 @@ class AgentConfig:
     name: str
     next_agent: str | None = None
     router: str | None = None
+    tools: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -132,10 +133,16 @@ def load_agents_config(config_path: Path) -> AgentsConfig:
                 f"these are mutually exclusive"
             )
 
+        raw_tools = section.get("tools", [])
+        tools_list: list[str] = (
+            [str(t) for t in raw_tools] if isinstance(raw_tools, list) else []
+        )
+
         agents[agent_name] = AgentConfig(
             name=agent_name,
             next_agent=next_agent,
             router=router,
+            tools=tools_list,
         )
 
     routers: dict[str, RouterConfig] = {}
