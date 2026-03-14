@@ -126,6 +126,16 @@ class Settings(BaseSettings):
         "Each agent loads {prompts_dir}/{agent_name}.md at construction.",
     )
 
+    # MCP tools
+    mcp_config_path: Path = Field(
+        Path("agents.mcp.json"),
+        description="Path to MCP server configuration file.",
+    )
+    mcp_secrets_path: Path = Field(
+        Path("agents.mcp.secrets.json"),
+        description="Path to MCP server secrets file (gitignored).",
+    )
+
     # Agent wiring
     agents_config_path: Path = Field(
         Path("agents.toml"),

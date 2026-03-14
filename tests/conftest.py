@@ -47,6 +47,8 @@ def test_settings() -> Settings:
         cost_db_path=Path(":memory:"),  # type: ignore[call-arg]
         agent_loop_detection_threshold=3,  # type: ignore[call-arg]
         agent_max_messages_per_thread=0,  # type: ignore[call-arg]
+        mcp_config_path=Path("tests/fixtures/agents.mcp.json"),  # type: ignore[call-arg]
+        mcp_secrets_path=Path("tests/fixtures/agents.mcp.secrets.json"),  # type: ignore[call-arg]
     )
 
 

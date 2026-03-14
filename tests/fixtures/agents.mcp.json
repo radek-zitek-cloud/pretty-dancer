@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "test_server": {
+      "command": "echo",
+      "args": ["test"]
+    },
+    "another_server": {
+      "command": "cat",
+      "args": ["/dev/null"],
+      "env": {
+        "BASE_KEY": "base_value"
+      }
+    }
+  }
+}

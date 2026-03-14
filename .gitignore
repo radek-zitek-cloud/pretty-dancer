@@ -1,5 +1,6 @@
 # Local configuration — never commit secrets
 .env
+agents.mcp.secrets.json
 
 # Runtime data — all contents ignored, folder tracked via .gitkeep
 data/*
