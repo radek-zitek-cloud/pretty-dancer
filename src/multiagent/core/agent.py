@@ -3,16 +3,19 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from multiagent.config.settings import Settings
+from multiagent.core.costs import CostEntry, CostLedger
 from multiagent.exceptions import AgentConfigurationError, AgentLLMError
 
 
@@ -24,10 +27,11 @@ class LLMAgent:
     no transport, no side effects beyond the LLM call.
     """
 
-    def __init__(self, name: str, settings: Settings, checkpointer: BaseCheckpointSaver) -> None:  # type: ignore[type-arg]
-        """Initialise the agent with a name, settings, and checkpointer."""
+    def __init__(self, name: str, settings: Settings, checkpointer: BaseCheckpointSaver, cost_ledger: CostLedger) -> None:  # type: ignore[type-arg]
+        """Initialise the agent with a name, settings, checkpointer, and cost ledger."""
         self.name = name
         self._settings = settings
+        self._cost_ledger = cost_ledger
         self._log = structlog.get_logger().bind(agent=name)
         self._system_prompt = self._load_prompt(name, settings.prompts_dir)
         self._checkpointer = checkpointer
@@ -86,7 +90,7 @@ class LLMAgent:
             Compiled graph with checkpointer attached.
         """
 
-        async def call_llm(state: MessagesState) -> MessagesState:  # type: ignore[return-type]
+        async def call_llm(state: MessagesState, config: RunnableConfig) -> MessagesState:  # type: ignore[return-type]
             self._log.debug("llm_call_start", history_length=len(state["messages"]))
             response = await self._llm.ainvoke([
                 SystemMessage(content=self._system_prompt),
@@ -96,11 +100,26 @@ class LLMAgent:
             self._log.debug("llm_call_complete", output_chars=len(output))
 
             usage = response.usage_metadata or {}
+            input_tokens = int(usage.get("input_tokens") or 0)
+            output_tokens = int(usage.get("output_tokens") or 0)
+            total_tokens = int(usage.get("total_tokens") or 0)
+
+            metadata = response.response_metadata or {}
+            input_unit_price = float(metadata.get("input_unit_price", 0.0))
+            output_unit_price = float(metadata.get("output_unit_price", 0.0))
+            cost_usd = (
+                input_tokens * input_unit_price
+                + output_tokens * output_unit_price
+            )
+
             self._log.debug(
                 "llm_usage",
-                input_tokens=usage.get("input_tokens"),
-                output_tokens=usage.get("output_tokens"),
-                total_tokens=usage.get("total_tokens"),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cost_usd=cost_usd,
+                input_unit_price=input_unit_price,
+                output_unit_price=output_unit_price,
                 history_length=len(state["messages"]),
             )
 
@@ -111,10 +130,30 @@ class LLMAgent:
                     system_prompt=self._system_prompt,
                     response=output,
                     history_length=len(state["messages"]),
-                    input_tokens=usage.get("input_tokens"),
-                    output_tokens=usage.get("output_tokens"),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_usd=cost_usd,
                     output_chars=len(output),
                 )
+
+            thread_id = config["configurable"]["thread_id"]
+            entry = CostEntry(
+                timestamp=datetime.now(UTC).isoformat(),
+                thread_id=str(thread_id),
+                agent=self.name,
+                model=self._settings.llm_model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                input_unit_price=input_unit_price,
+                output_unit_price=output_unit_price,
+                cost_usd=cost_usd,
+                experiment=self._settings.experiment,
+            )
+            try:
+                await self._cost_ledger.record(entry)
+            except Exception as exc:
+                self._log.warning("cost_recording_failed", error=str(exc))
 
             return {"messages": [response]}  # type: ignore[return-value]
 

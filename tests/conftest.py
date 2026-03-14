@@ -85,6 +85,16 @@ def sample_message() -> Message:
 
 
 @pytest.fixture
+def mock_cost_ledger() -> AsyncMock:
+    """Mock CostLedger with an async record method."""
+    from multiagent.core.costs import CostLedger
+
+    mock = AsyncMock(spec=CostLedger)
+    mock.record = AsyncMock()
+    return mock
+
+
+@pytest.fixture
 def mock_llm_response() -> str:
     return "Mocked LLM response for testing."
 
@@ -96,12 +106,26 @@ def mock_llm(mocker: MockerFixture, mock_llm_response: str) -> AsyncMock:
     Intercepts at the LangChain level so the full LangGraph graph
     executes — only the actual HTTP call is replaced.
 
-    Returns a real AIMessage so MessagesState's add_messages reducer
-    can process it correctly.
+    Returns a real AIMessage with usage_metadata and response_metadata
+    so MessagesState's add_messages reducer and cost tracking can
+    process it correctly.
     """
     from langchain_core.messages import AIMessage
 
-    mock = AsyncMock(return_value=AIMessage(content=mock_llm_response))
+    mock = AsyncMock(
+        return_value=AIMessage(
+            content=mock_llm_response,
+            usage_metadata={
+                "input_tokens": 10,
+                "output_tokens": 20,
+                "total_tokens": 30,
+            },
+            response_metadata={
+                "input_unit_price": 0.000003,
+                "output_unit_price": 0.000015,
+            },
+        )
+    )
     mocker.patch(
         "langchain_openai.ChatOpenAI.ainvoke",
         side_effect=mock,
