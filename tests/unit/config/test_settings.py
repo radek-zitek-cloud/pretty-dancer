@@ -70,9 +70,9 @@ class TestObservabilitySettings:
     def test_log_trace_llm_defaults_to_false(self, test_settings: Settings) -> None:
         assert test_settings.log_trace_llm is False
 
-    def test_experiment_defaults_to_empty_string(self) -> None:
+    def test_cluster_defaults_to_empty_string(self) -> None:
         s = Settings(
             greeting_secret="secret",  # type: ignore[call-arg]
             openrouter_api_key="test-key",  # type: ignore[call-arg]
         )
-        assert s.experiment == ""
+        assert s.cluster == ""

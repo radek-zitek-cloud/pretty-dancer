@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Generator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -25,14 +26,17 @@ def _mock_chat_deps() -> Generator[dict[str, MagicMock | AsyncMock]]:  # pyright
     mock_transport.send = AsyncMock()
 
     mock_settings = MagicMock()
-    mock_settings.agents_config_path = "agents.toml"
     mock_settings.sqlite_db_path = ":memory:"
     mock_settings.sqlite_poll_interval_seconds = 0.05
     mock_settings.chat_reply_timeout_seconds = 0.1
-    mock_settings.experiment = ""
+    mock_settings.cluster = ""
 
     with (
         patch("multiagent.cli.chat.load_settings", return_value=mock_settings),
+        patch(
+            "multiagent.cli.chat.agents_config_path",
+            return_value=Path("agents.toml"),
+        ),
         patch(
             "multiagent.cli.chat.load_agents_config",
             return_value=AgentsConfig(
@@ -94,16 +98,19 @@ class TestChatCommand:
     def test_keyboard_interrupt_exits_zero(self) -> None:
         """KeyboardInterrupt in chat_command should exit with code 0."""
         mock_settings = MagicMock()
-        mock_settings.agents_config_path = "agents.toml"
         mock_settings.sqlite_db_path = ":memory:"
         mock_settings.sqlite_poll_interval_seconds = 0.05
         mock_settings.chat_reply_timeout_seconds = 0.1
-        mock_settings.experiment = ""
+        mock_settings.cluster = ""
 
         with (
             patch(
                 "multiagent.cli.chat.load_settings",
                 return_value=mock_settings,
+            ),
+            patch(
+                "multiagent.cli.chat.agents_config_path",
+                return_value=Path("agents.toml"),
             ),
             patch(
                 "multiagent.cli.chat.load_agents_config",
@@ -127,7 +134,7 @@ class TestChatCommand:
                 chat_command(
                     agent_name="progressive",
                     thread_id="",
-                    experiment="",
+                    cluster="",
                 )
             assert exc_info.value.code == 0
 

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from multiagent.config.agents import AgentsConfig, load_agents_config, resolve_experiment_path
+from multiagent.config.agents import AgentsConfig, load_agents_config
 from multiagent.exceptions import InvalidConfigurationError
 
 FIXTURE_PATH = Path("tests/fixtures/agents.toml")
@@ -142,46 +142,3 @@ class TestAgentTools:
         result = load_agents_config(FIXTURE_PATH)
         assert result.agents["researcher"].tools == []
         assert result.agents["critic"].tools == []
-
-
-class TestExperimentConfigResolution:
-    def test_resolves_experiment_config_path_correctly(
-        self, tmp_path: Path
-    ) -> None:
-        exp_file = tmp_path / "agents.research-desk.toml"
-        exp_file.write_text(
-            '[agents.supervisor]\nrouter = "gate"\n',
-            encoding="utf-8",
-        )
-        result = resolve_experiment_path(
-            tmp_path / "agents.toml", "research-desk", "config"
-        )
-        assert result == exp_file
-
-    def test_raises_when_experiment_config_missing(
-        self, tmp_path: Path
-    ) -> None:
-        with pytest.raises(
-            InvalidConfigurationError, match="Experiment config not found"
-        ):
-            resolve_experiment_path(
-                tmp_path / "agents.toml", "nonexistent", "config"
-            )
-
-    def test_returns_default_path_when_no_experiment(
-        self, tmp_path: Path
-    ) -> None:
-        base = tmp_path / "agents.toml"
-        result = resolve_experiment_path(base, "", "config")
-        assert result == base
-
-    def test_loads_experiment_agents_config(self, tmp_path: Path) -> None:
-        exp_file = tmp_path / "agents.research-desk.toml"
-        exp_file.write_text(
-            '[agents.supervisor]\n',
-            encoding="utf-8",
-        )
-        result = load_agents_config(
-            tmp_path / "agents.toml", experiment="research-desk"
-        )
-        assert "supervisor" in result.agents

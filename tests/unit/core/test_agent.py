@@ -32,7 +32,7 @@ class TestLLMAgentInit:
         self, test_settings: Settings, checkpointer: MemorySaver,
         mock_cost_ledger: AsyncMock,
     ) -> None:
-        test_settings.prompts_dir = Path("nonexistent/directory")
+        test_settings.clusters_dir = Path("nonexistent/directory")
         with pytest.raises(AgentConfigurationError, match="Prompt file not found"):
             LLMAgent("researcher", test_settings, checkpointer, mock_cost_ledger)
 

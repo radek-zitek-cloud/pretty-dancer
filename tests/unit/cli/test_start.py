@@ -41,11 +41,14 @@ def _mock_start_deps(tmp_path: Path) -> Any:
 
     with (
         patch("multiagent.cli.start.load_settings") as mock_settings,
+        patch("multiagent.cli.start.agents_config_path", return_value=Path("agents.toml")),
         patch("multiagent.cli.start.load_agents_config") as mock_configs,
         patch(
             "multiagent.cli.start.load_mcp_config",
             return_value=MCPConfig(),
         ),
+        patch("multiagent.cli.start.mcp_config_path", return_value=Path("agents.mcp.json")),
+        patch("multiagent.cli.start.mcp_secrets_path", return_value=None),
         patch("multiagent.cli.start.configure_logging", return_value=(None, None)),
         patch(
             "multiagent.cli.start.create_transport", return_value=mock_transport
@@ -58,7 +61,7 @@ def _mock_start_deps(tmp_path: Path) -> Any:
             return_value=mock_runner_instance,
         ) as mock_runner_cls,
     ):
-        mock_settings.return_value.agents_config_path = "agents.toml"
+        mock_settings.return_value.cluster = ""
         mock_settings.return_value.checkpointer_db_path = tmp_path / "checkpoints.db"
         mock_settings.return_value.sqlite_db_path = tmp_path / "agents.db"
         mock_configs.return_value = AgentsConfig(
@@ -113,6 +116,7 @@ class TestStartCommand:
 
         with (
             patch("multiagent.cli.start.load_settings") as mock_settings,
+            patch("multiagent.cli.start.agents_config_path", return_value=Path("agents.toml")),
             patch(
                 "multiagent.cli.start.load_agents_config",
                 return_value=AgentsConfig(agents={}, routers={})
@@ -121,6 +125,8 @@ class TestStartCommand:
                 "multiagent.cli.start.load_mcp_config",
                 return_value=MCPConfig(),
             ),
+            patch("multiagent.cli.start.mcp_config_path", return_value=Path("agents.mcp.json")),
+            patch("multiagent.cli.start.mcp_secrets_path", return_value=None),
             patch(
                 "multiagent.cli.start.configure_logging",
                 return_value=(None, None),
@@ -130,7 +136,7 @@ class TestStartCommand:
             patch("multiagent.cli.start.CostLedger", mock_cost_ledger_cls),
             patch("multiagent.cli.start.AgentRunner") as mock_runner_cls,
         ):
-            mock_settings.return_value.agents_config_path = "agents.toml"
+            mock_settings.return_value.cluster = ""
             mock_settings.return_value.checkpointer_db_path = tmp_path / "checkpoints.db"
             mock_settings.return_value.sqlite_db_path = tmp_path / "agents.db"
 
