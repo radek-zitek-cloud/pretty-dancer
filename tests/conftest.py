@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
     from multiagent.config.settings import Settings
-    from multiagent.transport.base import Message
+    from multiagent.models import Message
     from multiagent.transport.sqlite import SQLiteTransport
     from multiagent.transport.terminal import TerminalTransport
 
@@ -101,7 +101,7 @@ def terminal_transport(test_settings: Settings) -> TerminalTransport:
 @pytest.fixture
 def sample_message() -> Message:
     """A valid Message for use in transport tests."""
-    from multiagent.transport.base import Message
+    from multiagent.models import Message
 
     return Message(
         from_agent="human",

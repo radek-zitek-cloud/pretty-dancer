@@ -8,7 +8,7 @@ from multiagent.config.settings import Settings
 from multiagent.core.agent import LLMAgent
 from multiagent.core.costs import CostLedger
 from multiagent.core.runner import AgentRunner
-from multiagent.transport.base import Message
+from multiagent.models import Message
 from multiagent.transport.sqlite import SQLiteTransport
 
 
