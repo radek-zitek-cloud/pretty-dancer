@@ -357,18 +357,22 @@ class LLMAgent:
             }
 
         self._log.debug("mcp_client_starting", servers=len(self._tool_configs))
-        # Suppress MCP subprocess stderr noise (npm warnings, debug output)
-        # by temporarily redirecting the stderr file descriptor
+        # Redirect MCP subprocess stderr to a dedicated log file.
+        # MCP servers (npm, smithery, exa) write verbose debug output
+        # to stderr which clutters the cluster console.
+        log_dir = self._settings.log_dir
+        log_dir.mkdir(parents=True, exist_ok=True)
+        mcp_log = log_dir / "mcp-servers.log"
         original_fd = os.dup(2)
-        devnull_fd = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull_fd, 2)
-        os.close(devnull_fd)
+        log_fd = os.open(str(mcp_log), os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        os.dup2(log_fd, 2)
+        os.close(log_fd)
         try:
             client = MultiServerMCPClient(server_map_named)
             tools = await client.get_tools()
+            self._log.debug("mcp_tools_loaded", tool_count=len(tools))
+            graph = self._build_graph(tools=tools)
+            return await self._invoke_graph(graph, input_text, thread_id)
         finally:
             os.dup2(original_fd, 2)
             os.close(original_fd)
-        self._log.debug("mcp_tools_loaded", tool_count=len(tools))
-        graph = self._build_graph(tools=tools)
-        return await self._invoke_graph(graph, input_text, thread_id)
