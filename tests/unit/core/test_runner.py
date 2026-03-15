@@ -9,7 +9,7 @@ from multiagent.core.agent import RunResult
 from multiagent.core.runner import AgentRunner
 from multiagent.core.shutdown import ShutdownMonitor
 from multiagent.exceptions import AgentLLMError
-from multiagent.transport.base import Message
+from multiagent.models import Message
 
 
 @pytest.fixture
