@@ -34,8 +34,7 @@ SOURCE_DIRS = [
     Path("clusters"),
 ]
 
-SOURCE_EXTENSIONS = {".md", ".toml", ".json"}
-EXCLUDED_FILENAMES = {"agents.mcp.secrets.json"}
+SOURCE_EXTENSIONS = {".md"}
 
 
 def chunk_text(text: str, size: int, overlap: int) -> list[str]:
@@ -65,9 +64,7 @@ def collect_files() -> list[Path]:
             print(f"  Skipping {source_dir}/ — directory not found")
             continue
         for ext in SOURCE_EXTENSIONS:
-            for path in sorted(source_dir.rglob(f"*{ext}")):
-                if path.name not in EXCLUDED_FILENAMES:
-                    files.append(path)
+            files.extend(sorted(source_dir.rglob(f"*{ext}")))
     return files
 
 
