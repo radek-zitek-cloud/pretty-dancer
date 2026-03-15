@@ -20,7 +20,7 @@ next_agent = "supervisor"
 
 [routers.research_supervisor]
 type = "llm"
-prompt = "prompts/research-desk/routers/research_supervisor.md"
+prompt = "clusters/research-desk/prompts/routers/research_supervisor.md"
 routes.fundamentals = "fundamentals"
 routes.risk = "risk"
 routes.synthesis = "synthesis"
