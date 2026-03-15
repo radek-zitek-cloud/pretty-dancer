@@ -1,0 +1,7 @@
+# Platform Architect Cluster
+# Single architect agent with RAG over project docs and tasks
+# Human <-> architect dialogue only
+
+[agents.architect]
+next_agent = "human"
+tools = ["chroma", "exa"]

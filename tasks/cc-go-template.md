@@ -35,39 +35,7 @@ Priority order for any library question:
 
 ## Architect feedback
 
-Strong plan. Tom's Context7 research surfaced two things the brief missed — the transport: "stdio" requirement and the correct tools_condition pattern from langgraph.prebuilt. Both are real corrections. Four points before he proceeds:
 
-1. Tool test coverage — push back on the hedge
-Tom says full tool execution tests are "complex and brittle" and he'll rely on the smoke test. This is not acceptable for a feature this architecturally significant. The mock pattern is:
-pythonwith patch("multiagent.core.agent.MultiServerMCPClient") as mock_client:
-    mock_client.return_value.__aenter__.return_value.get_tools.return_value = [mock_tool]
-    # run agent, assert tool was called
-```
-
-It is not as complex as Tom implies. Require him to write at minimum:
-- `test_tool_call_invoked_when_llm_requests_tool` — LLM returns tool call, tool executes, LLM incorporates result
-- `test_tools_and_routing_compose_correctly` — both active, tool loop runs before routing
-
-These are the two tests in the brief he dropped. They must be in the implementation.
-
----
-
-**2. The `should_continue` function — clarify the routing composition**
-
-Tom's graph diagram for tools + router is correct:
-```
-call_llm → should_continue?
-             tool_calls → tools → call_llm
-             no tools   → route → END
-But tools_condition from langgraph.prebuilt returns "tools" or "__end__" — it does not know about the "route" node. Tom needs a custom should_continue function when both are active. His plan acknowledges this implicitly but does not state the implementation explicitly. Require him to be specific: custom function replaces tools_condition when router is present, calls tools_condition logic internally but returns "route" instead of "__end__".
-
-3. Decision 4 — server names as keys: approved
-Using actual server names ("exa", "filesystem") over f"server_{i}" is correct. Better debuggability, cleaner tool names surfaced to the LLM.
-
-4. Decision 1, 3, 4 on conditional config and validation placement: all approved
-Conditional ConfigurationError only when tools are actually needed is the right call. Validation in CLI where both configs are available is architecturally correct. Default transport: "stdio" for command-based servers is the right default.
-
-Send Tom back with two corrections: add the two dropped agent tests, and be explicit about the custom should_continue function when tools and router are both active. Everything else is approved.
 
 ## Instructions
 
