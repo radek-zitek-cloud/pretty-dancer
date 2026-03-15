@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from multiagent.exceptions import AgentLLMError
-from multiagent.transport.base import Message
+from multiagent.models import Message
 
 if TYPE_CHECKING:
     from multiagent.config.settings import Settings
