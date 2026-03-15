@@ -73,9 +73,12 @@ class LLMAgent:
         self._router = router
         self._tool_configs = tool_configs or []
         self._log = structlog.get_logger().bind(agent=name)
-        self._system_prompt = self._load_prompt(
-            prompt_name or name, settings.prompts_dir
-        )
+        if prompt_name:
+            self._system_prompt = self._load_prompt_path(Path(prompt_name))
+        else:
+            self._system_prompt = self._load_prompt_path(
+                settings.prompts_dir / f"{name}.md"
+            )
         self._checkpointer = checkpointer
         self._llm = ChatOpenAI(
             model=settings.llm_model,
@@ -87,20 +90,17 @@ class LLMAgent:
         # Pre-built graph for agents without tools (reused across calls)
         self._graph = self._build_graph() if not self._tool_configs else None
 
-    def _load_prompt(self, name: str, prompts_dir: Path) -> str:
-        """Load the system prompt from {prompts_dir}/{name}.md.
+    def _load_prompt_path(self, prompt_path: Path) -> str:
+        """Load the system prompt from a file path.
 
         Reads the file contents and strips leading/trailing whitespace.
-        The entire file content is the system prompt — no parsing is
-        performed at this stage.
 
         # TODO: parse YAML frontmatter when structured prompts are introduced.
         #       Frontmatter will carry metadata (version, tags, model hints).
         #       Body after frontmatter delimiter (---) becomes the prompt text.
 
         Args:
-            name: Agent name. Used to construct the filename.
-            prompts_dir: Directory containing prompt files.
+            prompt_path: Full path to the prompt file.
 
         Returns:
             System prompt string with whitespace stripped.
@@ -109,16 +109,15 @@ class LLMAgent:
             AgentConfigurationError: If the prompt file does not exist or
                 cannot be read.
         """
-        prompt_path = prompts_dir / f"{name}.md"
         try:
             return prompt_path.read_text(encoding="utf-8").strip()
         except FileNotFoundError:
             raise AgentConfigurationError(
-                f"Prompt file not found for agent '{name}': {prompt_path}"
+                f"Prompt file not found for agent '{self.name}': {prompt_path}"
             ) from None
         except OSError as exc:
             raise AgentConfigurationError(
-                f"Failed to read prompt file for agent '{name}': {exc}"
+                f"Failed to read prompt file for agent '{self.name}': {exc}"
             ) from exc
 
     def _build_graph(  # type: ignore[type-arg]
