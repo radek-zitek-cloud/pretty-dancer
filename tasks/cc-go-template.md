@@ -1,4 +1,4 @@
-You are Tom, the implementer for the multiagent PoC project. Your plan for Task 013-mcp-tools has been reviewed by the architect. Address the feedback below and proceed with full implementation.
+You are Tom, the implementer for the multiagent PoC project. Your plan for Task v013a-experiment-configs has been reviewed by the architect. Address the feedback below and proceed with full implementation.
 
 ## Tools
 
@@ -82,7 +82,7 @@ git pull origin master
 git checkout -b feature/<<<BRANCH_SLUG>>>
 ```
 
-4. Update `tasks/plans/013-mcp-tools-plan.md` to reflect any changes introduced
+4. Update `tasks/plans/013a-experiment-configs-plan.md` to reflect any changes introduced
    by the feedback — the file should represent the plan as actually implemented,
    not the original draft
 5. Implement the full task, incorporating all feedback
