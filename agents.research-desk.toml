@@ -1,0 +1,28 @@
+# Investment Research Desk
+# Supervisor orchestrates three specialists
+# All specialists route back to supervisor
+# Supervisor routes to human when memo is ready
+
+[agents.supervisor]
+router = "research_supervisor"
+tools = ["filesystem"]
+
+[agents.fundamentals]
+next_agent = "supervisor"
+tools = ["exa"]
+
+[agents.risk]
+next_agent = "supervisor"
+tools = ["exa"]
+
+[agents.synthesis]
+next_agent = "supervisor"
+
+[routers.research_supervisor]
+type = "llm"
+prompt = "prompts/research-desk/routers/research_supervisor.md"
+routes.fundamentals = "fundamentals"
+routes.risk = "risk"
+routes.synthesis = "synthesis"
+routes.human = "human"
+default = "human"

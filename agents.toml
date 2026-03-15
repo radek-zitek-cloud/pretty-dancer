@@ -1,28 +1,17 @@
-# Investment Research Desk
-# Supervisor orchestrates three specialists
-# All specialists route back to supervisor
-# Supervisor routes to human when memo is ready
+# Default cluster — editorial pipeline
+# editor routes dynamically via keyword router
+# writer → linguist → human (static chain)
 
-[agents.supervisor]
-router = "research_supervisor"
-tools = ["filesystem"]
+[agents.editor]
+router = "editorial_gate"
 
-[agents.fundamentals]
-next_agent = "supervisor"
-tools = ["exa"]
+[agents.writer]
+next_agent = "linguist"
 
-[agents.risk]
-next_agent = "supervisor"
-tools = ["exa"]
+[agents.linguist]
+next_agent = "human"
 
-[agents.synthesis]
-next_agent = "supervisor"
-
-[routers.research_supervisor]
-type = "llm"
-prompt = "prompts/routers/research_supervisor.md"
-routes.fundamentals = "fundamentals"
-routes.risk = "risk"
-routes.synthesis = "synthesis"
-routes.human = "human"
+[routers.editorial_gate]
+type = "keyword"
+routes.writer = ["WRITER BRIEF", "END BRIEF"]
 default = "human"
