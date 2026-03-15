@@ -12,17 +12,28 @@ You have been invoked with task ID: `$ARGUMENTS`
 
 ### Step 1 — Read the feedback
 
-Locate and read the feedback file:
+Locate all feedback files for this task:
 
 ```bash
-cat tasks/feedback/$ARGUMENTS.md
+ls tasks/feedback/$ARGUMENTS-*.md 2>/dev/null
 ```
 
-If the file does not exist, stop and report:
+If no files match, also try the exact name as a fallback:
+
+```bash
+ls tasks/feedback/$ARGUMENTS.md 2>/dev/null
 ```
-No feedback file found at tasks/feedback/$ARGUMENTS.md
-Create this file with the architect's feedback before invoking /tom-build.
+
+If neither produces any files, stop and report:
+
 ```
+No feedback files found matching tasks/feedback/$ARGUMENTS-*.md
+Create at least one feedback file before invoking /tom-build.
+```
+
+Read every matching file in filename order. If there are multiple files,
+concatenate them — all feedback applies. Note how many feedback files you
+found and list their names before proceeding.
 
 Read the feedback carefully before touching any code. If any item is unclear,
 state your interpretation explicitly — do not guess silently.
@@ -37,8 +48,8 @@ ls tasks/$ARGUMENTS-*.md
 
 Branch name: `feature/{brief-stem}`
 
-For example, if the brief is `tasks/013a-experiment-configs.md`:
-- Branch: `feature/013a-experiment-configs`
+For example, if the brief is `tasks/013b-cluster-refactor.md`:
+- Branch: `feature/013b-cluster-refactor`
 
 ### Step 3 — Create the feature branch
 
