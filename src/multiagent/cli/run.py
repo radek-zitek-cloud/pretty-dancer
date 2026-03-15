@@ -11,6 +11,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
+from multiagent.config.mcp import load_mcp_config
 from multiagent.core.agent import LLMAgent
 from multiagent.core.costs import CostLedger
 from multiagent.core.routing import build_router
@@ -45,6 +46,17 @@ async def _run(
         )
 
     agent_config = agents_config.agents[agent_name]
+    mcp_config = load_mcp_config(
+        settings.mcp_config_path, settings.mcp_secrets_path
+    )
+
+    # Validate tool references
+    for tool_name in agent_config.tools:
+        if tool_name not in mcp_config.servers:
+            raise ConfigurationError(
+                f"Agent '{agent_name}' references tool '{tool_name}' "
+                f"which is not defined in agents.mcp.json"
+            )
 
     router = None
     if agent_config.router:
@@ -65,8 +77,13 @@ async def _run(
         str(settings.checkpointer_db_path)
     ) as checkpointer:
         async with CostLedger(settings.cost_db_path) as cost_ledger:
+            tool_configs = [
+                mcp_config.servers[t] for t in agent_config.tools
+            ] or None
             agent = LLMAgent(
-                agent_name, settings, checkpointer, cost_ledger, router=router
+                agent_name, settings, checkpointer, cost_ledger,
+                router=router, tool_configs=tool_configs,
+                prompt_name=agent_config.prompt,
             )
             runner = AgentRunner(
                 agent,

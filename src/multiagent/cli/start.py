@@ -11,6 +11,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
+from multiagent.config.mcp import load_mcp_config
 from multiagent.core.agent import LLMAgent
 from multiagent.core.costs import CostLedger
 from multiagent.core.routing import build_router
@@ -37,10 +38,22 @@ async def _start(experiment: str) -> None:
         typer.echo(f"JSON log  : {json_log}")
 
     agents_config = load_agents_config(settings.agents_config_path)
+    mcp_config = load_mcp_config(
+        settings.mcp_config_path, settings.mcp_secrets_path
+    )
 
     if not agents_config.agents:
         typer.echo("No agents configured — nothing to start.", err=True)
         return
+
+    # Validate tool references against MCP config
+    for name, config in agents_config.agents.items():
+        for tool_name in config.tools:
+            if tool_name not in mcp_config.servers:
+                raise ConfigurationError(
+                    f"Agent '{name}' references tool '{tool_name}' "
+                    f"which is not defined in agents.mcp.json"
+                )
 
     log.info("cluster_starting", agents=list(agents_config.agents.keys()))
 
@@ -69,9 +82,16 @@ async def _start(experiment: str) -> None:
                                 agents_config.routers[config.router], settings
                             )
 
+                        tool_configs = [
+                            mcp_config.servers[t]
+                            for t in config.tools
+                        ] or None
+
                         agent = LLMAgent(
                             name, settings, checkpointer, cost_ledger,
                             router=router,
+                            tool_configs=tool_configs,
+                            prompt_name=config.prompt,
                         )
                         runner = AgentRunner(
                             agent,

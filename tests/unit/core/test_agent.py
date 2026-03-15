@@ -370,3 +370,184 @@ class TestLLMAgentCheckpointIsolation:
             f"Agent B inherited next_agent='{result_b.next_agent}' from Agent A's "
             f"checkpoint — checkpoint_ns isolation is broken"
         )
+
+
+class TestLLMAgentTools:
+    def test_graph_without_tools_unchanged(
+        self, test_settings: Settings, mock_llm: AsyncMock,
+        checkpointer: MemorySaver, mock_cost_ledger: AsyncMock,
+    ) -> None:
+        """Agent with no tool_configs uses pre-built graph."""
+        agent = LLMAgent(
+            "researcher", test_settings, checkpointer, mock_cost_ledger,
+        )
+        assert agent._graph is not None
+        assert agent._tool_configs == []
+
+    def test_tool_configs_stored_on_agent(
+        self, test_settings: Settings, mock_llm: AsyncMock,
+        checkpointer: MemorySaver, mock_cost_ledger: AsyncMock,
+    ) -> None:
+        """Agent with tool_configs stores them and defers graph build."""
+        from multiagent.config.mcp import MCPServerConfig
+
+        configs = [MCPServerConfig(command="echo", args=["test"])]
+        agent = LLMAgent(
+            "researcher", test_settings, checkpointer, mock_cost_ledger,
+            tool_configs=configs,
+        )
+        assert agent._tool_configs == configs
+        assert agent._graph is None  # deferred — built per run()
+
+    async def test_tool_call_invoked_when_llm_requests_tool(
+        self, test_settings: Settings, checkpointer: MemorySaver,
+        mock_cost_ledger: AsyncMock, mocker: MockerFixture,
+    ) -> None:
+        """Full tool round-trip: LLM requests tool, tool executes,
+        LLM produces final answer incorporating tool result."""
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        from multiagent.config.mcp import MCPServerConfig
+
+        # First LLM call: request a tool call
+        tool_request = AIMessage(
+            content="",
+            tool_calls=[{
+                "id": "call_1",
+                "name": "search",
+                "args": {"query": "test"},
+            }],
+            usage_metadata={
+                "input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
+            },
+            response_metadata={},
+        )
+        # Second LLM call: final answer after tool result
+        final_answer = AIMessage(
+            content="Based on the search: result is 42.",
+            usage_metadata={
+                "input_tokens": 20, "output_tokens": 10, "total_tokens": 30,
+            },
+            response_metadata={},
+        )
+        llm_mock = AsyncMock(side_effect=[tool_request, final_answer])
+        mocker.patch("langchain_openai.ChatOpenAI.ainvoke", side_effect=llm_mock)
+
+        # Mock MCP client
+        from langchain_core.tools import Tool
+
+        mock_tool = Tool(
+            name="search",
+            description="Search the web",
+            func=lambda q: "42",  # type: ignore[misc]
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get_tools = AsyncMock(return_value=[mock_tool])
+        mock_client_cls = mocker.patch(
+            "multiagent.core.agent.MultiServerMCPClient"
+        )
+        mock_client_cls.return_value = mock_client
+
+        # Mock ToolNode to return a tool result
+        mock_tool_node = mocker.patch(
+            "multiagent.core.agent.ToolNode",
+        )
+        mock_tool_node.return_value = mocker.MagicMock(
+            side_effect=lambda state: {  # type: ignore[misc]
+                "messages": [
+                    ToolMessage(
+                        content="42",
+                        tool_call_id="call_1",
+                    )
+                ]
+            }
+        )
+
+        configs = [MCPServerConfig(command="echo", args=["test"])]
+        agent = LLMAgent(
+            "researcher", test_settings, checkpointer, mock_cost_ledger,
+            tool_configs=configs,
+        )
+        result = await agent.run("What is the answer?", "thread-tools")
+        assert "42" in result.response
+        assert llm_mock.call_count == 2
+
+    async def test_tools_and_routing_compose_correctly(
+        self, test_settings: Settings, checkpointer: MemorySaver,
+        mock_cost_ledger: AsyncMock, mocker: MockerFixture,
+    ) -> None:
+        """Agent with both tools and router: tool loop runs before routing."""
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        from multiagent.config.mcp import MCPServerConfig
+
+        # First LLM call: request tool
+        tool_request = AIMessage(
+            content="",
+            tool_calls=[{
+                "id": "call_1",
+                "name": "search",
+                "args": {"query": "test"},
+            }],
+            usage_metadata={
+                "input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
+            },
+            response_metadata={},
+        )
+        # Second LLM call: final answer with routing trigger
+        final_answer = AIMessage(
+            content="WRITER BRIEF: the answer is 42. END BRIEF",
+            usage_metadata={
+                "input_tokens": 20, "output_tokens": 10, "total_tokens": 30,
+            },
+            response_metadata={},
+        )
+        llm_mock = AsyncMock(side_effect=[tool_request, final_answer])
+        mocker.patch("langchain_openai.ChatOpenAI.ainvoke", side_effect=llm_mock)
+
+        # Mock MCP
+        from langchain_core.tools import Tool
+
+        mock_tool = Tool(
+            name="search",
+            description="Search",
+            func=lambda q: "42",  # type: ignore[misc]
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get_tools = AsyncMock(return_value=[mock_tool])
+        mock_client_cls = mocker.patch(
+            "multiagent.core.agent.MultiServerMCPClient"
+        )
+        mock_client_cls.return_value = mock_client
+
+        mock_tool_node = mocker.patch("multiagent.core.agent.ToolNode")
+        mock_tool_node.return_value = mocker.MagicMock(
+            side_effect=lambda state: {  # type: ignore[misc]
+                "messages": [
+                    ToolMessage(content="42", tool_call_id="call_1")
+                ]
+            }
+        )
+
+        # Router that triggers on "WRITER BRIEF"
+        router_config = RouterConfig(
+            name="test_gate",
+            type="keyword",
+            routes={"writer": ["WRITER BRIEF"]},
+            default="human",
+        )
+        router = KeywordRouter(router_config)
+
+        configs = [MCPServerConfig(command="echo", args=["test"])]
+        agent = LLMAgent(
+            "researcher", test_settings, checkpointer, mock_cost_ledger,
+            router=router,
+            tool_configs=configs,
+        )
+        result = await agent.run("Research something", "thread-tools-route")
+        # Tool loop ran (2 LLM calls)
+        assert llm_mock.call_count == 2
+        # Routing ran after tools — detected WRITER BRIEF
+        assert result.next_agent == "writer"

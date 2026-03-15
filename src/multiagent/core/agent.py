@@ -10,11 +10,14 @@ from typing import NamedTuple
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.prebuilt import ToolNode
 
+from multiagent.config.mcp import MCPServerConfig
 from multiagent.config.settings import Settings
 from multiagent.core.costs import CostEntry, CostLedger
 from multiagent.core.routing import KeywordRouter, LLMRouter
@@ -60,14 +63,22 @@ class LLMAgent:
         checkpointer: BaseCheckpointSaver,
         cost_ledger: CostLedger,
         router: KeywordRouter | LLMRouter | None = None,
+        tool_configs: list[MCPServerConfig] | None = None,
+        prompt_name: str | None = None,
     ) -> None:
         """Initialise the agent with a name, settings, checkpointer, and cost ledger."""
         self.name = name
         self._settings = settings
         self._cost_ledger = cost_ledger
         self._router = router
+        self._tool_configs = tool_configs or []
         self._log = structlog.get_logger().bind(agent=name)
-        self._system_prompt = self._load_prompt(name, settings.prompts_dir)
+        if prompt_name:
+            self._system_prompt = self._load_prompt_path(Path(prompt_name))
+        else:
+            self._system_prompt = self._load_prompt_path(
+                settings.prompts_dir / f"{name}.md"
+            )
         self._checkpointer = checkpointer
         self._llm = ChatOpenAI(
             model=settings.llm_model,
@@ -76,22 +87,20 @@ class LLMAgent:
             api_key=settings.openrouter_api_key,  # type: ignore[arg-type]
             base_url=settings.openrouter_base_url,
         )
-        self._graph = self._build_graph()
+        # Pre-built graph for agents without tools (reused across calls)
+        self._graph = self._build_graph() if not self._tool_configs else None
 
-    def _load_prompt(self, name: str, prompts_dir: Path) -> str:
-        """Load the system prompt from {prompts_dir}/{name}.md.
+    def _load_prompt_path(self, prompt_path: Path) -> str:
+        """Load the system prompt from a file path.
 
         Reads the file contents and strips leading/trailing whitespace.
-        The entire file content is the system prompt — no parsing is
-        performed at this stage.
 
         # TODO: parse YAML frontmatter when structured prompts are introduced.
         #       Frontmatter will carry metadata (version, tags, model hints).
         #       Body after frontmatter delimiter (---) becomes the prompt text.
 
         Args:
-            name: Agent name. Used to construct the filename.
-            prompts_dir: Directory containing prompt files.
+            prompt_path: Full path to the prompt file.
 
         Returns:
             System prompt string with whitespace stripped.
@@ -100,37 +109,45 @@ class LLMAgent:
             AgentConfigurationError: If the prompt file does not exist or
                 cannot be read.
         """
-        prompt_path = prompts_dir / f"{name}.md"
         try:
             return prompt_path.read_text(encoding="utf-8").strip()
         except FileNotFoundError:
             raise AgentConfigurationError(
-                f"Prompt file not found for agent '{name}': {prompt_path}"
+                f"Prompt file not found for agent '{self.name}': {prompt_path}"
             ) from None
         except OSError as exc:
             raise AgentConfigurationError(
-                f"Failed to read prompt file for agent '{name}': {exc}"
+                f"Failed to read prompt file for agent '{self.name}': {exc}"
             ) from exc
 
-    def _build_graph(self) -> CompiledStateGraph:  # type: ignore[type-arg]
+    def _build_graph(  # type: ignore[type-arg]
+        self,
+        tools: list[object] | None = None,
+    ) -> CompiledStateGraph:
         """Build the LangGraph processing graph with AgentState.
 
         Uses AgentState (extending MessagesState) which maintains a list
         of BaseMessage objects that accumulates across invocations via the
-        checkpointer. When a router is configured, a routing node is added
-        after the LLM node to determine the next destination.
+        checkpointer. Supports optional tools (ReAct pattern) and/or
+        routing.
 
         Graph structure:
-            Without router: llm → END
-            With router:    llm → route → END
+            No tools, no router:  llm → END
+            No tools, router:     llm → route → END
+            Tools, no router:     llm → should_continue → tools → llm / END
+            Tools + router:       llm → should_continue → tools → llm / route → END
+
+        Args:
+            tools: Optional list of LangChain-compatible tools from MCP.
 
         Returns:
             Compiled graph with checkpointer attached.
         """
+        llm = self._llm.bind_tools(tools) if tools else self._llm
 
         async def call_llm(state: AgentState, config: RunnableConfig) -> AgentState:  # type: ignore[return-type]
             self._log.debug("llm_call_start", history_length=len(state["messages"]))
-            response = await self._llm.ainvoke([
+            response = await llm.ainvoke([
                 SystemMessage(content=self._system_prompt),
                 *state["messages"],
             ])
@@ -204,8 +221,33 @@ class LLMAgent:
         graph.add_node("llm", call_llm)
         graph.set_entry_point("llm")
 
-        if self._router is not None:
+        has_router = self._router is not None
+
+        if tools:
+            graph.add_node("tools", ToolNode(tools))
+
+            # Custom should_continue: tool_calls → "tools", else → "route" or END
+            after_done = "route" if has_router else END
+
+            def should_continue(state: AgentState) -> str:
+                last_msg = state["messages"][-1]
+                tool_calls = getattr(last_msg, "tool_calls", None)
+                if tool_calls:
+                    return "tools"
+                return after_done
+
+            graph.add_conditional_edges(
+                "llm", should_continue, ["tools", after_done]
+            )
+            graph.add_edge("tools", "llm")
+        elif has_router:
+            graph.add_edge("llm", "route")
+        else:
+            graph.add_edge("llm", END)
+
+        if has_router:
             router = self._router
+            assert router is not None
 
             async def route_node(state: AgentState) -> AgentState:  # type: ignore[return-type]
                 content = state["messages"][-1].content
@@ -218,20 +260,42 @@ class LLMAgent:
                 return {"next_agent": destination}  # type: ignore[return-value]
 
             graph.add_node("route", route_node)
-            graph.add_edge("llm", "route")
+            if not tools:
+                pass  # edge from llm → route already added above
             graph.add_edge("route", END)
-        else:
-            graph.add_edge("llm", END)
 
         return graph.compile(checkpointer=self._checkpointer)
+
+    async def _invoke_graph(
+        self,
+        graph: CompiledStateGraph,  # type: ignore[type-arg]
+        input_text: str,
+        thread_id: str,
+    ) -> RunResult:
+        """Invoke a compiled graph and extract the result."""
+        namespaced_thread = f"{self.name}:{thread_id}"
+        config = {"configurable": {"thread_id": namespaced_thread}}
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content=input_text)]},
+            config=config,
+        )
+        content = result["messages"][-1].content
+        response = content if isinstance(content, str) else str(content)
+        if not response:
+            self._log.warning(
+                "empty_llm_response",
+                thread_id=thread_id,
+                message_count=len(result["messages"]),
+            )
+        next_agent: str | None = result.get("next_agent")
+        return RunResult(response=response, next_agent=next_agent)
 
     async def run(self, input_text: str, thread_id: str) -> RunResult:
         """Process input_text with full conversation history for the thread.
 
-        The checkpointer restores prior messages for this thread_id before
-        invocation and persists the updated state after. On the first call
-        for a thread_id, history is empty — behaviour is identical to the
-        stateless design. Subsequent calls include the full prior exchange.
+        For agents with tools, an MCP client is opened for each call to
+        provide tool access. For agents without tools, the pre-built graph
+        is reused.
 
         Args:
             input_text: The message body to process.
@@ -243,22 +307,52 @@ class LLMAgent:
         Raises:
             AgentLLMError: If the LLM API call fails.
         """
-        # Namespace thread_id per agent to isolate checkpoint state.
-        # Without this, a routing decision (next_agent) set by one agent
-        # leaks into another agent's state on the same thread.
-        namespaced_thread = f"{self.name}:{thread_id}"
-        config = {"configurable": {"thread_id": namespaced_thread}}
         try:
-            result = await self._graph.ainvoke(
-                {"messages": [HumanMessage(content=input_text)]},
-                config=config,
+            if self._tool_configs:
+                return await self._run_with_tools(input_text, thread_id)
+            assert self._graph is not None
+            return await self._invoke_graph(
+                self._graph, input_text, thread_id
             )
-            content = result["messages"][-1].content
-            response = content if isinstance(content, str) else str(content)
-            next_agent: str | None = result.get("next_agent")
-            return RunResult(response=response, next_agent=next_agent)
+        except AgentLLMError:
+            raise
         except Exception as exc:
-            self._log.error("llm_call_failed", error=str(exc), thread_id=thread_id)
+            self._log.error(
+                "llm_call_failed", error=str(exc), thread_id=thread_id
+            )
             raise AgentLLMError(
                 f"Agent '{self.name}' LLM call failed: {exc}"
             ) from exc
+
+    async def _run_with_tools(
+        self, input_text: str, thread_id: str
+    ) -> RunResult:
+        """Run with MCP tool access — graph rebuilt each call."""
+        import os
+
+        server_map_named: dict[str, dict[str, object]] = {}
+        for i, cfg in enumerate(self._tool_configs):
+            key = f"mcp_{i}"
+            server_map_named[key] = {
+                "command": cfg.command,
+                "args": cfg.args,
+                "env": cfg.env,
+                "transport": cfg.transport,
+            }
+
+        self._log.debug("mcp_client_starting", servers=len(self._tool_configs))
+        # Suppress MCP subprocess stderr noise (npm warnings, debug output)
+        # by temporarily redirecting the stderr file descriptor
+        original_fd = os.dup(2)
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull_fd, 2)
+        os.close(devnull_fd)
+        try:
+            client = MultiServerMCPClient(server_map_named)
+            tools = await client.get_tools()
+        finally:
+            os.dup2(original_fd, 2)
+            os.close(original_fd)
+        self._log.debug("mcp_tools_loaded", tool_count=len(tools))
+        graph = self._build_graph(tools=tools)
+        return await self._invoke_graph(graph, input_text, thread_id)

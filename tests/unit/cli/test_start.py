@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from multiagent.config.agents import AgentConfig, AgentsConfig
+from multiagent.config.mcp import MCPConfig
 
 
 @pytest.fixture
@@ -41,6 +42,10 @@ def _mock_start_deps(tmp_path: Path) -> Any:
     with (
         patch("multiagent.cli.start.load_settings") as mock_settings,
         patch("multiagent.cli.start.load_agents_config") as mock_configs,
+        patch(
+            "multiagent.cli.start.load_mcp_config",
+            return_value=MCPConfig(),
+        ),
         patch("multiagent.cli.start.configure_logging", return_value=(None, None)),
         patch(
             "multiagent.cli.start.create_transport", return_value=mock_transport
@@ -111,6 +116,10 @@ class TestStartCommand:
             patch(
                 "multiagent.cli.start.load_agents_config",
                 return_value=AgentsConfig(agents={}, routers={})
+            ),
+            patch(
+                "multiagent.cli.start.load_mcp_config",
+                return_value=MCPConfig(),
             ),
             patch(
                 "multiagent.cli.start.configure_logging",

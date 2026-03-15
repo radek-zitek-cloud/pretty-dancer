@@ -124,3 +124,21 @@ class TestRouterConfig:
         assert router.prompt_path == Path("prompts/routers/gate.md")
         assert router.model == "anthropic/claude-haiku-4-5"
         assert router.routes == {"writer": ["writer"], "human": ["human"]}
+
+
+class TestAgentTools:
+    def test_loads_tools_field_from_toml(self, tmp_path: Path) -> None:
+        toml_file = tmp_path / "agents.toml"
+        toml_file.write_text(
+            '[agents.researcher]\n'
+            'next_agent = "critic"\n'
+            'tools = ["exa", "filesystem"]\n',
+            encoding="utf-8",
+        )
+        result = load_agents_config(toml_file)
+        assert result.agents["researcher"].tools == ["exa", "filesystem"]
+
+    def test_tools_defaults_to_empty_list_when_absent(self) -> None:
+        result = load_agents_config(FIXTURE_PATH)
+        assert result.agents["researcher"].tools == []
+        assert result.agents["critic"].tools == []
