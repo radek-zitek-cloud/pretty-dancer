@@ -100,6 +100,15 @@ class AgentRunner:
 
         assert run_result is not None  # guaranteed by break above
 
+        # Empty LLM response — don't ack, don't dispatch. The message
+        # stays unprocessed and will be retried on the next poll cycle.
+        if not run_result.response:
+            op_log.warning(
+                "empty_response_retry",
+                body_len=len(msg.body),
+            )
+            return False
+
         assert msg.id is not None  # set by transport on receive
         await self._transport.ack(msg.id)
         op_log.info("message_processed")

@@ -467,3 +467,39 @@ class TestMaxMessages:
         await runner.run_once()
         mock_transport.thread_message_count.assert_not_called()
         mock_transport.send.assert_called_once()
+
+
+class TestEmptyResponseRetry:
+    async def test_empty_response_not_acked_and_returns_false(
+        self,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        test_settings: Settings,
+        sample_msg: Message,
+    ) -> None:
+        """Empty LLM response leaves message unprocessed for retry."""
+        runner = AgentRunner(
+            mock_agent, mock_transport, test_settings,
+            next_agent="critic",
+        )
+        mock_transport.receive.return_value = sample_msg
+        mock_agent.run.return_value = RunResult(response="")
+        result = await runner.run_once()
+        assert result is False
+        mock_transport.ack.assert_not_called()
+        mock_transport.send.assert_not_called()
+
+    async def test_nonempty_response_acked_normally(
+        self,
+        runner: AgentRunner,
+        mock_agent: AsyncMock,
+        mock_transport: AsyncMock,
+        sample_msg: Message,
+    ) -> None:
+        """Non-empty response is acked and dispatched normally."""
+        mock_transport.receive.return_value = sample_msg
+        mock_agent.run.return_value = RunResult(response="real answer")
+        result = await runner.run_once()
+        assert result is True
+        mock_transport.ack.assert_called_once()
+        mock_transport.send.assert_called_once()
