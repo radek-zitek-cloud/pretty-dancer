@@ -53,7 +53,10 @@ class TestCostLedgerMigration:
             "(timestamp, thread_id, agent, model, input_tokens, output_tokens, "
             "total_tokens, input_unit_price, output_unit_price, cost_usd, experiment) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("2026-03-14T10:00:00", "t1", "researcher", "model", 100, 50, 150, 0.0, 0.0, 0.001, "old-exp"),
+            (
+                "2026-03-14T10:00:00", "t1", "researcher", "model",
+                100, 50, 150, 0.0, 0.0, 0.001, "old-exp",
+            ),
         )
         conn.commit()
         conn.close()
