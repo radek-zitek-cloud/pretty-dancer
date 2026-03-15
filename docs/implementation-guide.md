@@ -4,7 +4,7 @@
 **Status:** Approved  
 **Author:** Architecture (Claude.ai) + Radek Zítek  
 **Audited by:** Tom (implementer agent)  
-**Last Updated:** 2026-03-14
+**Last Updated:** 2026-03-15
 
 ---
 
@@ -97,24 +97,36 @@ multiagent/
 ├── .gitattributes             # enforces LF line endings
 ├── .pre-commit-config.yaml
 ├── .python-version            # pins Python 3.12 for uv
-├── agents.toml                # agent wiring and router configuration
 ├── justfile                   # task runner definitions
 ├── pyproject.toml
 ├── uv.lock                    # committed lockfile
 ├── README.md
 │
-├── docs/
-│   └── adr/
-│       └── README.md          # ADR index and template
+├── clusters/                  # cluster-specific configurations
+│   ├── default/               # loaded when no --cluster flag is passed
+│   │   ├── agents.toml        # agent wiring and router configuration
+│   │   ├── agents.mcp.json    # MCP server definitions
+│   │   ├── agents.mcp.secrets.json     # gitignored credentials
+│   │   ├── agents.mcp.secrets.example.json
+│   │   └── prompts/           # system prompt files, one per agent
+│   │       ├── <agent_name>.md
+│   │       └── routers/       # LLM classifier router prompts
+│   ├── research-desk/         # named cluster example
+│   │   ├── agents.toml
+│   │   ├── agents.mcp.json
+│   │   └── prompts/
+│   └── platform-architect/
+│       ├── agents.toml
+│       ├── agents.mcp.json
+│       └── prompts/
 │
-├── prompts/                   # system prompt files, one per agent
-│   ├── <agent_name>.md
-│   └── routers/               # LLM classifier router prompts
-│       └── <router_name>.md
+├── docs/
+│   └── implementation-guide.md
 │
 ├── scripts/                   # inspection and utility scripts (not CLI commands)
 │   ├── browse_threads.py
 │   ├── compare_runs.py
+│   ├── ingest_docs.py         # index docs into ChromaDB for RAG
 │   ├── show_costs.py
 │   ├── show_run.py
 │   └── show_thread.py
@@ -123,16 +135,18 @@ multiagent/
 │   └── multiagent/
 │       ├── __init__.py        # package version only
 │       ├── exceptions.py      # complete custom exception hierarchy
+│       ├── models.py          # shared types: Message dataclass
 │       ├── version.py         # SemVer utilities
 │       │
 │       ├── config/
 │       │   ├── __init__.py    # exports: Settings, load_settings, AgentConfig,
-│       │   │                  #          load_agents_config
-│       │   ├── settings.py    # pydantic-settings Settings class
-│       │   └── agents.py      # AgentConfig, RouterConfig, AgentsConfig, loaders
+│       │   │                  #          load_agents_config, path derivation functions
+│       │   ├── settings.py    # Settings class + cluster path derivation functions
+│       │   ├── agents.py      # AgentConfig, RouterConfig, AgentsConfig, loaders
+│       │   └── mcp.py         # MCPServerConfig, MCPConfig, load_mcp_config
 │       │
 │       ├── core/              # agent logic — zero I/O knowledge
-│       │   ├── __init__.py    # exports: LLMAgent, AgentRunner, CostLedger
+│       │   ├── __init__.py    # exports: LLMAgent, AgentRunner
 │       │   ├── agent.py       # LLMAgent: system prompt + LangGraph graph
 │       │   ├── costs.py       # CostLedger, CostEntry
 │       │   ├── routing.py     # KeywordRouter, LLMRouter, build_router
@@ -141,9 +155,13 @@ multiagent/
 │       │
 │       ├── transport/         # I/O adapters — zero agent logic
 │       │   ├── __init__.py    # exports: Transport, Message, create_transport
-│       │   ├── base.py        # Transport ABC + Message dataclass
+│       │   ├── base.py        # Transport ABC (re-exports Message from models)
 │       │   ├── sqlite.py      # SQLiteTransport
 │       │   └── terminal.py    # TerminalTransport
+│       │
+│       ├── logging/           # structured logging configuration
+│       │   ├── __init__.py    # exports: configure_logging, get_logger
+│       │   └── setup.py       # three-stream logging setup
 │       │
 │       └── cli/               # entry points only — wire core to transport
 │           ├── __init__.py
@@ -154,6 +172,7 @@ multiagent/
 │           ├── stop.py        # `multiagent stop` command
 │           ├── listen.py      # `multiagent listen` command
 │           ├── chat.py        # `multiagent chat` command
+│           ├── monitor.py     # `multiagent monitor` TUI command
 │           └── version.py     # `multiagent version` command
 │
 ├── tasks/                     # task briefs and change requests
@@ -180,6 +199,7 @@ multiagent/
 │   ├── agents.db              # SQLite transport database
 │   ├── checkpoints.db         # LangGraph checkpoint database
 │   ├── costs.db               # cost ledger database
+│   ├── chroma/                # ChromaDB persistent data for RAG
 │   └── .gitkeep
 │
 └── logs/                      # gitignored run log files
@@ -245,12 +265,18 @@ These rules are absolute. They are enforced by code review and verified by grep
 after every task.
 
 ```
-cli/          → may import from: core/, transport/, config/, exceptions
-core/         → may import from: config/, exceptions     [NEVER transport/ or cli/]
-transport/    → may import from: config/, exceptions     [NEVER core/ or cli/]
+models.py     → may import from: stdlib only             [NEVER config/, core/, transport/]
+cli/          → may import from: core/, transport/, config/, models, exceptions
+core/         → may import from: config/, models, exceptions  [NEVER transport/ or cli/]
+transport/    → may import from: config/, models, exceptions  [NEVER core/ or cli/]
 config/       → may import from: exceptions              [NEVER core/ or transport/]
 scripts/      → may import from: config/, exceptions (via Settings only)
 ```
+
+`Message` is defined in `models.py` and re-exported by `transport/base.py` for
+backward compatibility. `core/` must import `Message` from `multiagent.models`,
+never from `transport/`. The `Transport` ABC stays in `transport/base.py` — if
+`core/` needs it for type annotations, use `TYPE_CHECKING`.
 
 `rich` may be imported in `cli/` and `scripts/`. It must never be imported in
 `core/` or `transport/`.
@@ -260,11 +286,15 @@ scripts/      → may import from: config/, exceptions (via Settings only)
 ```bash
 grep -r "from multiagent.cli"       src/multiagent/core/
 grep -r "from multiagent.cli"       src/multiagent/transport/
-grep -r "from multiagent.transport" src/multiagent/core/
+# core/ may only reference transport/ inside TYPE_CHECKING blocks:
+grep -r "from multiagent.transport" src/multiagent/core/ | grep -v "TYPE_CHECKING" | grep -v "^.*:    "
 grep -r "from multiagent.core"      src/multiagent/transport/
 grep -r "import rich"               src/multiagent/core/
 grep -r "import rich"               src/multiagent/transport/
 ```
+
+Programmatic boundary tests in `tests/unit/test_module_boundaries.py` enforce
+these rules automatically.
 
 ---
 
@@ -293,7 +323,7 @@ all of the above.
   `InvalidConfigurationError` on validation failure. It is called once at the
   CLI entry point.
 - Settings are immutable after construction for the lifetime of the process,
-  with the exception of `experiment` which may be set by the CLI before agent
+  with the exception of `cluster` which may be set by the CLI before agent
   construction.
 - `extra="forbid"` is set on `Settings`. Unknown environment variable names
   that match the settings prefix cause startup failure — prevents silent typo
@@ -318,9 +348,23 @@ documents fields by group for orientation.
 | Transport | `transport_backend`, `sqlite_db_path`, `sqlite_poll_interval_seconds` |
 | Checkpointer | `checkpointer_db_path` |
 | Cost | `cost_db_path` |
-| Observability | `log_console_enabled`, `log_console_level`, `log_human_file_enabled`, `log_human_file_level`, `log_json_file_enabled`, `log_json_file_level`, `log_dir`, `log_trace_llm`, `experiment` |
-| Agent config | `prompts_dir`, `agents_config_path` |
+| Observability | `log_console_enabled`, `log_console_level`, `log_human_file_enabled`, `log_human_file_level`, `log_json_file_enabled`, `log_json_file_level`, `log_dir`, `log_trace_llm` |
+| Cluster | `cluster`, `clusters_dir` |
+| Termination | `agent_loop_detection_threshold`, `agent_max_messages_per_thread` |
 | CLI | `chat_reply_timeout_seconds` |
+
+### 6.5 Cluster Path Derivation
+
+The following module-level functions in `config/settings.py` derive paths
+from `cluster` and `clusters_dir`. They are not fields on `Settings`.
+
+| Function | Returns |
+|---|---|
+| `cluster_dir(settings)` | `clusters_dir / {cluster or "default"}` |
+| `agents_config_path(settings)` | `cluster_dir / "agents.toml"` (raises if missing) |
+| `mcp_config_path(settings)` | `cluster_dir / "agents.mcp.json"` |
+| `mcp_secrets_path(settings)` | Secrets path with fallback to default cluster, or `None` |
+| `prompts_dir(settings)` | `cluster_dir / "prompts"` |
 
 ---
 
@@ -333,14 +377,14 @@ Every run produces up to three independent output streams:
 | Stream | File | Renderer | LLM trace |
 |---|---|---|---|
 | Console | stdout | ConsoleRenderer (colors) | suppressed |
-| Human file | `logs/{timestamp}_{agent}[_{experiment}].log` | ConsoleRenderer (no colors) | suppressed |
-| JSON file | `logs/{timestamp}_{agent}[_{experiment}].jsonl` | JSONRenderer | included |
+| Human file | `logs/{timestamp}_{agent}[_{cluster}].log` | ConsoleRenderer (no colors) | suppressed |
+| JSON file | `logs/{timestamp}_{agent}[_{cluster}].jsonl` | JSONRenderer | included |
 
 Each stream is independently enabled/disabled and has its own log level.
 
 ### 7.2 `configure_logging()` Contract
 
-Signature: `configure_logging(settings, agent_name, experiment) -> tuple[Path | None, Path | None]`
+Signature: `configure_logging(settings, agent_name, cluster) -> tuple[Path | None, Path | None]`
 
 Returns paths to the human log file and JSON log file (or `None` if disabled).
 Called once at CLI startup before any log calls.
@@ -427,10 +471,13 @@ the LLM's response. It has no knowledge of transport, routing, or I/O.
 ### 9.2 `LLMAgent` Construction Contract
 
 Required parameters: `name`, `settings`, `checkpointer`, `cost_ledger`.
-Optional: `router` (defaults to `None` for static routing).
+Optional: `router` (defaults to `None` for static routing),
+`tool_configs` (MCP server configs for tool access),
+`prompt_name` (explicit prompt path override from agents.toml).
 
-The system prompt is loaded from `{settings.prompts_dir}/{name}.md` at construction.
-It is not passed as a parameter.
+The system prompt is loaded from `prompts_dir(settings) / "{name}.md"` at
+construction. When `prompt_name` is set (from the `prompt` field in agents.toml),
+it overrides the convention-based path.
 
 ### 9.3 LangGraph State Contract
 
@@ -666,9 +713,10 @@ Scripts must never crash when a database does not exist or is empty. Missing
 |---|---|---|
 | `browse_threads.py` | Interactive thread browser with cost column | `just threads` |
 | `show_thread.py` | Full message chain with cost footer | `just thread <id>` |
-| `show_run.py` | Log events for one run with token/cost columns | `just run <file>` |
+| `show_run.py` | Log events for one run with token/cost columns | `just run-summary <file>` |
 | `compare_runs.py` | Side-by-side run comparison | `just compare <files>` |
-| `show_costs.py` | Cost views by experiment/agent/model | `just costs` |
+| `show_costs.py` | Cost views by cluster/agent/model | `just costs` |
+| `ingest_docs.py` | Index markdown files into ChromaDB for RAG | `just ingest` |
 
 ---
 
@@ -742,12 +790,13 @@ All development tasks run via `just`. Run `just` with no arguments to list targe
 
 | Target | Purpose |
 |---|---|
-| `just run <agent>` | Run a single agent |
-| `just send <agent> "<message>"` | Send a message to an agent |
-| `just start [experiment]` | Start all agents from agents.toml |
+| `just run <agent> [cluster]` | Run a single agent |
+| `just send <agent> "<message>" [cluster]` | Send a message to an agent |
+| `just start [cluster]` | Start all agents from cluster config |
 | `just stop` | Write stop file to halt the cluster |
 | `just listen [thread_id]` | Poll for messages addressed to human |
-| `just chat <agent> [thread_id]` | Interactive REPL with an agent |
+| `just chat <agent> [thread_id] [cluster]` | Interactive REPL with an agent |
+| `just monitor [cluster] [thread_id]` | Launch the platform monitor TUI |
 
 ### Inspection
 
@@ -756,9 +805,10 @@ All development tasks run via `just`. Run `just` with no arguments to list targe
 | `just threads` | Browse all threads interactively |
 | `just thread <id>` | Show full message chain for a thread |
 | `just runs` | List recent run log files |
-| `just costs` | Cost summary by experiment |
+| `just costs` | Cost summary by cluster |
 | `just costs-by-agent` | Cost breakdown by agent |
 | `just costs-by-model` | Cost breakdown by model |
+| `just ingest` | Index docs and cluster prompts into ChromaDB |
 
 ### Development
 
