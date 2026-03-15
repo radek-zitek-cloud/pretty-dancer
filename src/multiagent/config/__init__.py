@@ -13,7 +13,15 @@ from multiagent.config.agents import (
     load_agents_config,
 )
 from multiagent.config.mcp import MCPConfig, MCPServerConfig, load_mcp_config
-from multiagent.config.settings import Settings, load_settings
+from multiagent.config.settings import (
+    Settings,
+    agents_config_path,
+    cluster_dir,
+    load_settings,
+    mcp_config_path,
+    mcp_secrets_path,
+    prompts_dir,
+)
 
 __all__ = [
     "AgentConfig",
@@ -22,7 +30,12 @@ __all__ = [
     "MCPServerConfig",
     "RouterConfig",
     "Settings",
+    "agents_config_path",
+    "cluster_dir",
     "load_agents_config",
     "load_mcp_config",
     "load_settings",
+    "mcp_config_path",
+    "mcp_secrets_path",
+    "prompts_dir",
 ]
