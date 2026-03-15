@@ -60,6 +60,7 @@ class AgentConfig:
     next_agent: str | None = None
     router: str | None = None
     tools: list[str] = field(default_factory=list)
+    prompt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -138,11 +139,14 @@ def load_agents_config(config_path: Path) -> AgentsConfig:
             [str(t) for t in raw_tools] if isinstance(raw_tools, list) else []
         )
 
+        prompt: str | None = section.get("prompt")
+
         agents[agent_name] = AgentConfig(
             name=agent_name,
             next_agent=next_agent,
             router=router,
             tools=tools_list,
+            prompt=prompt,
         )
 
     routers: dict[str, RouterConfig] = {}

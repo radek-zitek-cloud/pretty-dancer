@@ -83,6 +83,7 @@ async def _run(
             agent = LLMAgent(
                 agent_name, settings, checkpointer, cost_ledger,
                 router=router, tool_configs=tool_configs,
+                prompt_name=agent_config.prompt,
             )
             runner = AgentRunner(
                 agent,

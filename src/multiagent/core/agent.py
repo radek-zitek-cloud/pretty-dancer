@@ -64,6 +64,7 @@ class LLMAgent:
         cost_ledger: CostLedger,
         router: KeywordRouter | LLMRouter | None = None,
         tool_configs: list[MCPServerConfig] | None = None,
+        prompt_name: str | None = None,
     ) -> None:
         """Initialise the agent with a name, settings, checkpointer, and cost ledger."""
         self.name = name
@@ -72,7 +73,9 @@ class LLMAgent:
         self._router = router
         self._tool_configs = tool_configs or []
         self._log = structlog.get_logger().bind(agent=name)
-        self._system_prompt = self._load_prompt(name, settings.prompts_dir)
+        self._system_prompt = self._load_prompt(
+            prompt_name or name, settings.prompts_dir
+        )
         self._checkpointer = checkpointer
         self._llm = ChatOpenAI(
             model=settings.llm_model,

@@ -91,6 +91,7 @@ async def _start(experiment: str) -> None:
                             name, settings, checkpointer, cost_ledger,
                             router=router,
                             tool_configs=tool_configs,
+                            prompt_name=config.prompt,
                         )
                         runner = AgentRunner(
                             agent,
