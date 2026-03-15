@@ -24,6 +24,19 @@ from multiagent.core.routing import KeywordRouter, LLMRouter
 from multiagent.exceptions import AgentConfigurationError, AgentLLMError
 
 
+def _resolve_prompt_path(
+    prompts_dir: Path, agent_name: str, experiment: str,
+) -> Path:
+    """Resolve system prompt path for the given agent and experiment.
+
+    When experiment is set, looks in the experiment subdirectory first.
+    Falls back to the flat prompts directory if no experiment is set.
+    """
+    if experiment:
+        return prompts_dir / experiment / f"{agent_name}.md"
+    return prompts_dir / f"{agent_name}.md"
+
+
 class AgentState(MessagesState):
     """Extended graph state with routing decision.
 
@@ -74,11 +87,14 @@ class LLMAgent:
         self._tool_configs = tool_configs or []
         self._log = structlog.get_logger().bind(agent=name)
         if prompt_name:
+            # Explicit prompt path from agents.toml — use directly
             self._system_prompt = self._load_prompt_path(Path(prompt_name))
         else:
-            self._system_prompt = self._load_prompt_path(
-                settings.prompts_dir / f"{name}.md"
+            # Convention-based: experiment subdir if set, else flat
+            prompt_path = _resolve_prompt_path(
+                settings.prompts_dir, name, settings.experiment
             )
+            self._system_prompt = self._load_prompt_path(prompt_path)
         self._checkpointer = checkpointer
         self._llm = ChatOpenAI(
             model=settings.llm_model,

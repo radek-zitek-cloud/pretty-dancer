@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 
 import structlog
@@ -24,6 +25,12 @@ from multiagent.transport import create_transport
 
 async def _start(experiment: str) -> None:
     """Load config, construct shared resources, and run all agents."""
+    if isinstance(experiment, str) and experiment and not re.match(r"^[a-z0-9-]+$", experiment):  # type: ignore[reportUnnecessaryIsInstance]
+        raise typer.BadParameter(
+            f"Invalid experiment name '{experiment}'. "
+            "Experiment names must contain only lowercase letters, digits, and hyphens."
+        )
+
     settings = load_settings()
     if experiment:
         settings.experiment = experiment
@@ -37,9 +44,12 @@ async def _start(experiment: str) -> None:
     if json_log:
         typer.echo(f"JSON log  : {json_log}")
 
-    agents_config = load_agents_config(settings.agents_config_path)
+    agents_config = load_agents_config(
+        settings.agents_config_path, experiment=experiment
+    )
     mcp_config = load_mcp_config(
-        settings.mcp_config_path, settings.mcp_secrets_path
+        settings.mcp_config_path, settings.mcp_secrets_path,
+        experiment=experiment,
     )
 
     if not agents_config.agents:

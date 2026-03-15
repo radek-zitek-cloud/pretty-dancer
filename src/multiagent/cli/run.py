@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 
 import structlog
@@ -27,6 +28,12 @@ async def _run(
     experiment: str,
 ) -> None:
     """Async entry point for the run command."""
+    if experiment and not re.match(r"^[a-z0-9-]+$", experiment):
+        raise typer.BadParameter(
+            f"Invalid experiment name '{experiment}'. "
+            "Experiment names must contain only lowercase letters, digits, and hyphens."
+        )
+
     settings = load_settings()
     if experiment:
         settings.experiment = experiment
@@ -38,7 +45,9 @@ async def _run(
     if json_log:
         typer.echo(f"JSON log  : {json_log}")
 
-    agents_config = load_agents_config(settings.agents_config_path)
+    agents_config = load_agents_config(
+        settings.agents_config_path, experiment=experiment
+    )
     if agent_name not in agents_config.agents:
         raise typer.BadParameter(
             f"Agent '{agent_name}' not found in {settings.agents_config_path}. "
@@ -47,7 +56,8 @@ async def _run(
 
     agent_config = agents_config.agents[agent_name]
     mcp_config = load_mcp_config(
-        settings.mcp_config_path, settings.mcp_secrets_path
+        settings.mcp_config_path, settings.mcp_secrets_path,
+        experiment=experiment,
     )
 
     # Validate tool references

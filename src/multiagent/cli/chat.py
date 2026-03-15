@@ -8,6 +8,7 @@ direct SQL (same pattern as listen and the inspection scripts).
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid as uuid_module
 from datetime import UTC, datetime
 
@@ -152,7 +153,16 @@ def chat_command(
 ) -> None:
     """Start an interactive chat session with a named agent."""
     settings = load_settings()
-    agents_config = load_agents_config(settings.agents_config_path)
+    if experiment and not re.match(r"^[a-z0-9-]+$", experiment):
+        raise typer.BadParameter(
+            f"Invalid experiment name '{experiment}'. "
+            "Experiment names must contain only lowercase letters, "
+            "digits, and hyphens."
+        )
+
+    agents_config = load_agents_config(
+        settings.agents_config_path, experiment=experiment
+    )
 
     if agent_name not in agents_config.agents:
         raise typer.BadParameter(

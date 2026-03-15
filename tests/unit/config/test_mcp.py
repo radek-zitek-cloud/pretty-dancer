@@ -118,3 +118,80 @@ class TestLoadMCPConfig:
 
         with pytest.raises(ConfigurationError, match="Failed to read"):
             load_mcp_config(config_path, secrets_path)
+
+
+class TestExperimentMCPResolution:
+    def test_resolves_experiment_mcp_config(self, tmp_path: Path) -> None:
+        """Experiment-specific MCP config loaded when present."""
+        exp_config = tmp_path / "mcp.research-desk.json"
+        exp_config.write_text(json.dumps({
+            "mcpServers": {"exa": {"command": "echo"}}
+        }))
+        secrets_path = tmp_path / "secrets.json"
+        result = load_mcp_config(
+            tmp_path / "mcp.json", secrets_path, experiment="research-desk"
+        )
+        assert "exa" in result.servers
+
+    def test_raises_when_experiment_mcp_config_missing(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ConfigurationError, match="Experiment MCP config"):
+            load_mcp_config(
+                tmp_path / "mcp.json",
+                tmp_path / "secrets.json",
+                experiment="nonexistent",
+            )
+
+    def test_secrets_falls_back_to_default(self, tmp_path: Path) -> None:
+        """When experiment secrets absent, falls back to default."""
+        exp_config = tmp_path / "mcp.test-exp.json"
+        exp_config.write_text(json.dumps({
+            "mcpServers": {"s": {"command": "echo"}}
+        }))
+        # Default secrets present, experiment secrets absent
+        default_secrets = tmp_path / "secrets.json"
+        default_secrets.write_text(json.dumps({
+            "mcpServers": {"s": {"env": {"KEY": "default"}}}
+        }))
+        result = load_mcp_config(
+            tmp_path / "mcp.json", default_secrets, experiment="test-exp"
+        )
+        assert result.servers["s"].env["KEY"] == "default"
+
+    def test_secrets_uses_experiment_file_when_present(
+        self, tmp_path: Path
+    ) -> None:
+        exp_config = tmp_path / "mcp.test-exp.json"
+        exp_config.write_text(json.dumps({
+            "mcpServers": {"s": {"command": "echo"}}
+        }))
+        exp_secrets = tmp_path / "secrets.test-exp.json"
+        exp_secrets.write_text(json.dumps({
+            "mcpServers": {"s": {"env": {"KEY": "experiment"}}}
+        }))
+        default_secrets = tmp_path / "secrets.json"
+        default_secrets.write_text(json.dumps({
+            "mcpServers": {"s": {"env": {"KEY": "default"}}}
+        }))
+        result = load_mcp_config(
+            tmp_path / "mcp.json", default_secrets, experiment="test-exp"
+        )
+        # Experiment secrets should take precedence... but we pass
+        # default_secrets as secrets_path. The resolver needs the base path.
+        # Actually the secrets resolver checks for secrets.test-exp.json
+        assert result.servers["s"].env["KEY"] == "experiment"
+
+    def test_secrets_silent_when_neither_present(
+        self, tmp_path: Path
+    ) -> None:
+        exp_config = tmp_path / "mcp.test-exp.json"
+        exp_config.write_text(json.dumps({
+            "mcpServers": {"s": {"command": "echo"}}
+        }))
+        result = load_mcp_config(
+            tmp_path / "mcp.json",
+            tmp_path / "secrets.json",
+            experiment="test-exp",
+        )
+        assert result.servers["s"].env == {}
