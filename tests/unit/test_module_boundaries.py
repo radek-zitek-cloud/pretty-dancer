@@ -29,7 +29,7 @@ class TestModuleBoundaries:
             if line and not line.split(":", 2)[-1].startswith("    ")
         ]
         assert violations == [], (
-            f"core/ has runtime imports from transport/:\n"
+            "core/ has runtime imports from transport/:\n"
             + "\n".join(violations)
         )
 
