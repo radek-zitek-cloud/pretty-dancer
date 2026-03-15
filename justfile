@@ -38,28 +38,28 @@ test-all:
 # ── Application ────────────────────────────────────────────────────────────
 
 # Run a named agent (polls for messages until interrupted)
-run agent experiment="":
-    uv run multiagent run {{agent}} {{if experiment != "" { "--experiment " + experiment } else { "" }}}
+run agent cluster="":
+    uv run multiagent run {{agent}} {{if cluster != "" { "--cluster " + cluster } else { "" }}}
 
 # Inject a message into the transport for a named agent
-send agent body experiment="":
-    uv run multiagent send {{agent}} "{{body}}" {{if experiment != "" { "--experiment " + experiment } else { "" }}}
+send agent body cluster="":
+    uv run multiagent send {{agent}} "{{body}}" {{if cluster != "" { "--cluster " + cluster } else { "" }}}
 
 # Listen for messages addressed to human
 listen thread_id="":
     uv run multiagent listen {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}}
 
 # Interactive chat session with an agent
-chat agent thread_id="" experiment="":
-    uv run multiagent chat {{agent}} {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}} {{if experiment != "" { "--experiment " + experiment } else { "" }}}
+chat agent thread_id="" cluster="":
+    uv run multiagent chat {{agent}} {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}} {{if cluster != "" { "--cluster " + cluster } else { "" }}}
 
 # Start all agents defined in agents.toml concurrently
-start experiment="":
-    uv run multiagent start {{if experiment != "" { "--experiment " + experiment } else { "" }}}
+start cluster="":
+    uv run multiagent start {{if cluster != "" { "--cluster " + cluster } else { "" }}}
 
 # Launch the platform monitor TUI
-monitor experiment="" thread_id="":
-    uv run multiagent monitor {{if experiment != "" { "--experiment " + experiment } else { "" }}} {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}}
+monitor cluster="" thread_id="":
+    uv run multiagent monitor {{if cluster != "" { "--cluster " + cluster } else { "" }}} {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}}
 
 # Request graceful shutdown of running agents (all or by name)
 stop agent="":
@@ -149,7 +149,7 @@ compare log1 log2:
 runs:
     @ls -lt logs/*.jsonl 2>/dev/null || echo "No run logs found in logs/"
 
-# Show cost summary by experiment
+# Show cost summary by cluster
 costs:
     uv run python scripts/show_costs.py
 

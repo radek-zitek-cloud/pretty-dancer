@@ -23,14 +23,14 @@ def _create_cost_db(db_path: Path, *, populate: bool = True) -> None:
             input_unit_price  REAL    NOT NULL,
             output_unit_price REAL    NOT NULL,
             cost_usd          REAL    NOT NULL,
-            experiment        TEXT    NOT NULL DEFAULT ''
+            cluster        TEXT    NOT NULL DEFAULT ''
         )
     """)
     if populate:
         conn.execute(
             "INSERT INTO cost_ledger "
             "(timestamp, thread_id, agent, model, input_tokens, output_tokens, "
-            "total_tokens, input_unit_price, output_unit_price, cost_usd, experiment) "
+            "total_tokens, input_unit_price, output_unit_price, cost_usd, cluster) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "2026-03-14T10:00:00",
@@ -49,7 +49,7 @@ def _create_cost_db(db_path: Path, *, populate: bool = True) -> None:
         conn.execute(
             "INSERT INTO cost_ledger "
             "(timestamp, thread_id, agent, model, input_tokens, output_tokens, "
-            "total_tokens, input_unit_price, output_unit_price, cost_usd, experiment) "
+            "total_tokens, input_unit_price, output_unit_price, cost_usd, cluster) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "2026-03-14T10:01:00",

@@ -31,9 +31,11 @@ CHUNK_OVERLAP = 100     # overlap between chunks
 SOURCE_DIRS = [
     Path("docs"),
     Path("tasks"),
+    Path("clusters"),
 ]
 
-SOURCE_EXTENSIONS = {".md"}
+SOURCE_EXTENSIONS = {".md", ".toml", ".json"}
+EXCLUDED_FILENAMES = {"agents.mcp.secrets.json"}
 
 
 def chunk_text(text: str, size: int, overlap: int) -> list[str]:
@@ -63,7 +65,9 @@ def collect_files() -> list[Path]:
             print(f"  Skipping {source_dir}/ — directory not found")
             continue
         for ext in SOURCE_EXTENSIONS:
-            files.extend(sorted(source_dir.rglob(f"*{ext}")))
+            for path in sorted(source_dir.rglob(f"*{ext}")):
+                if path.name not in EXCLUDED_FILENAMES:
+                    files.append(path)
     return files
 
 

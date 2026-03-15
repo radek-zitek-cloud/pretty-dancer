@@ -15,8 +15,8 @@ async def integration_settings() -> Settings:
     return Settings(
         sqlite_db_path=Path(":memory:"),  # type: ignore[call-arg]
         log_level="WARNING",  # type: ignore[call-arg]
-        agents_config_path=Path("agents.toml"),  # type: ignore[call-arg]
-        prompts_dir=Path("prompts"),  # type: ignore[call-arg]
+        clusters_dir=Path("clusters"),  # type: ignore[call-arg]
+        cluster="",  # type: ignore[call-arg]
         checkpointer_db_path=Path(":memory:"),  # type: ignore[call-arg]
     )
 

@@ -19,7 +19,7 @@ SAMPLE_ENTRY = CostEntry(
     input_unit_price=0.000003,
     output_unit_price=0.000015,
     cost_usd=0.001050,
-    experiment="test-exp",
+    cluster="test-exp",
 )
 
 
@@ -42,7 +42,7 @@ class TestCostLedger:
         assert row["output_tokens"] == 50
         assert row["total_tokens"] == 150
         assert row["cost_usd"] == pytest.approx(0.001050)
-        assert row["experiment"] == "test-exp"
+        assert row["cluster"] == "test-exp"
 
     async def test_record_failure_does_not_raise(self, tmp_path: Path):
         db = tmp_path / "costs.db"

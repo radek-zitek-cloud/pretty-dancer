@@ -1,13 +1,13 @@
-"""Analytical cost views across runs and experiments.
+"""Analytical cost views across runs and clusters.
 
 Reads from the cost ledger database. Database path is read from
 application settings.
 
 Usage:
-    uv run python scripts/show_costs.py                      # by experiment
+    uv run python scripts/show_costs.py                      # by cluster
     uv run python scripts/show_costs.py --by-agent           # by agent
     uv run python scripts/show_costs.py --by-model           # by model
-    uv run python scripts/show_costs.py --experiment LABEL   # single experiment
+    uv run python scripts/show_costs.py --cluster LABEL      # single cluster
     just costs
     just costs-by-agent
     just costs-by-model
@@ -23,15 +23,15 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-QUERY_BY_EXPERIMENT = """\
+QUERY_BY_CLUSTER = """\
 SELECT
-    experiment,
+    cluster,
     COUNT(*)            AS calls,
     SUM(input_tokens)   AS input_tokens,
     SUM(output_tokens)  AS output_tokens,
     SUM(cost_usd)       AS cost_usd
 FROM cost_ledger
-GROUP BY experiment
+GROUP BY cluster
 ORDER BY MIN(timestamp) DESC
 """
 
@@ -67,7 +67,7 @@ SELECT
     SUM(output_tokens)  AS output_tokens,
     SUM(cost_usd)       AS cost_usd
 FROM cost_ledger
-WHERE experiment = ?
+WHERE cluster = ?
 GROUP BY agent
 ORDER BY SUM(cost_usd) DESC
 """
@@ -140,7 +140,7 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--by-agent", action="store_true", help="Group by agent")
     group.add_argument("--by-model", action="store_true", help="Group by model")
-    group.add_argument("--experiment", type=str, default=None, help="Filter to one experiment")
+    group.add_argument("--cluster", type=str, default=None, help="Filter to one cluster")
     args = parser.parse_args()
 
     cost_db_path = _load_cost_db_path()
@@ -152,9 +152,9 @@ def main() -> None:
     conn = sqlite3.connect(str(cost_db_path))
     conn.row_factory = sqlite3.Row
     try:
-        if args.experiment is not None:
-            rows = conn.execute(QUERY_BY_AGENT_FILTERED, (args.experiment,)).fetchall()
-            title = f"Cost by agent \u2014 experiment: {args.experiment}"
+        if args.cluster is not None:
+            rows = conn.execute(QUERY_BY_AGENT_FILTERED, (args.cluster,)).fetchall()
+            title = f"Cost by agent \u2014 cluster: {args.cluster}"
             group_col = "Agent"
         elif args.by_agent:
             rows = conn.execute(QUERY_BY_AGENT).fetchall()
@@ -165,9 +165,9 @@ def main() -> None:
             title = "Cost by model"
             group_col = "Model"
         else:
-            rows = conn.execute(QUERY_BY_EXPERIMENT).fetchall()
-            title = "Cost by experiment"
-            group_col = "Experiment"
+            rows = conn.execute(QUERY_BY_CLUSTER).fetchall()
+            title = "Cost by cluster"
+            group_col = "Cluster"
     finally:
         conn.close()
 

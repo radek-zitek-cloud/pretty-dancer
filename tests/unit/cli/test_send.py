@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Generator
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -24,10 +25,11 @@ def _mock_send_deps() -> Generator[None]:  # pyright: ignore[reportUnusedFunctio
 
     with (
         patch("multiagent.cli.send.load_settings") as mock_settings,
+        patch("multiagent.cli.send.agents_config_path", return_value=Path("agents.toml")),
         patch("multiagent.cli.send.load_agents_config") as mock_configs,
         patch("multiagent.cli.send.create_transport", return_value=mock_transport),
     ):
-        mock_settings.return_value.agents_config_path = "agents.toml"
+        mock_settings.return_value.cluster = ""
         mock_configs.return_value = AgentsConfig(
             agents={
                 "progressive": AgentConfig(name="progressive"),
@@ -94,13 +96,14 @@ class TestSendFromAgent:
 
         with (
             patch("multiagent.cli.send.load_settings") as mock_settings,
+            patch("multiagent.cli.send.agents_config_path", return_value=Path("agents.toml")),
             patch("multiagent.cli.send.load_agents_config") as mock_configs,
             patch(
                 "multiagent.cli.send.create_transport",
                 return_value=mock_transport,
             ),
         ):
-            mock_settings.return_value.agents_config_path = "agents.toml"
+            mock_settings.return_value.cluster = ""
             mock_configs.return_value = AgentsConfig(
                 agents={"progressive": AgentConfig(name="progressive")},
                 routers={},

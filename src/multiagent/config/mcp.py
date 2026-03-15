@@ -64,30 +64,9 @@ def _parse_server(
     )
 
 
-def _resolve_mcp_secrets_path(
-    base_path: Path, experiment: str,
-) -> Path | None:
-    """Resolve MCP secrets path with fallback chain.
-
-    1. Experiment-specific: agents.mcp.secrets.{experiment}.json
-    2. Default: agents.mcp.secrets.json
-    3. None — no secrets available
-    """
-    if experiment:
-        experiment_secrets = (
-            base_path.parent / f"{base_path.stem}.{experiment}{base_path.suffix}"
-        )
-        if experiment_secrets.exists():
-            return experiment_secrets
-    if base_path.exists():
-        return base_path
-    return None
-
-
 def load_mcp_config(
     config_path: Path,
-    secrets_path: Path,
-    experiment: str = "",
+    secrets_path: Path | None,
 ) -> MCPConfig:
     """Load and merge MCP server config and secrets.
 
@@ -95,37 +74,19 @@ def load_mcp_config(
     agents.mcp.secrets.json for credentials. Secrets file is
     optional — if absent, servers are loaded without env overrides.
 
-    When experiment is non-empty, resolves experiment-specific paths.
-    MCP config is a hard stop if missing; secrets fall back to default.
-
     Args:
         config_path: Path to agents.mcp.json.
-        secrets_path: Path to agents.mcp.secrets.json (may not exist).
-        experiment: Experiment name for path resolution.
+        secrets_path: Path to agents.mcp.secrets.json, or None.
 
     Returns:
         Merged MCPConfig with all server definitions and credentials.
-        Returns empty MCPConfig if config_path does not exist and no experiment.
+        Returns empty MCPConfig if config_path does not exist.
 
     Raises:
-        ConfigurationError: If config file is missing (with experiment) or malformed.
+        ConfigurationError: If config file is malformed.
     """
-    # Resolve experiment-specific MCP config
-    if experiment:
-        resolved = config_path.parent / f"{config_path.stem}.{experiment}{config_path.suffix}"
-        if not resolved.exists():
-            raise ConfigurationError(
-                f"Experiment MCP config not found: {resolved}. "
-                f"Create this file to run the '{experiment}' experiment."
-            )
-        config_path = resolved
-
     if not config_path.exists():
         return MCPConfig()
-
-    # Resolve secrets with fallback
-    resolved_secrets = _resolve_mcp_secrets_path(secrets_path, experiment)
-    secrets_path = resolved_secrets if resolved_secrets else secrets_path
 
     try:
         raw: dict[str, Any] = json.loads(
@@ -144,7 +105,7 @@ def load_mcp_config(
 
     # Load secrets (optional)
     secrets_map: dict[str, dict[str, str]] = {}
-    if secrets_path.exists():
+    if secrets_path is not None and secrets_path.exists():
         try:
             secrets_raw: dict[str, Any] = json.loads(
                 secrets_path.read_text(encoding="utf-8")

@@ -1,0 +1,8 @@
+# Default cluster — minimal two-agent setup
+# Alfa → Beta → human round-trip
+
+[agents.alfa]
+next_agent = "beta"
+
+[agents.beta]
+next_agent = "human"

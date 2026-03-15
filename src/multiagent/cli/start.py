@@ -13,6 +13,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
 from multiagent.config.mcp import load_mcp_config
+from multiagent.config.settings import agents_config_path, mcp_config_path, mcp_secrets_path
 from multiagent.core.agent import LLMAgent
 from multiagent.core.costs import CostLedger
 from multiagent.core.routing import build_router
@@ -23,19 +24,19 @@ from multiagent.logging import configure_logging
 from multiagent.transport import create_transport
 
 
-async def _start(experiment: str) -> None:
+async def _start(cluster: str) -> None:
     """Load config, construct shared resources, and run all agents."""
-    if isinstance(experiment, str) and experiment and not re.match(r"^[a-z0-9-]+$", experiment):  # type: ignore[reportUnnecessaryIsInstance]
+    if isinstance(cluster, str) and cluster and not re.match(r"^[a-z0-9-]+$", cluster):  # type: ignore[reportUnnecessaryIsInstance]
         raise typer.BadParameter(
-            f"Invalid experiment name '{experiment}'. "
-            "Experiment names must contain only lowercase letters, digits, and hyphens."
+            f"Invalid cluster name '{cluster}'. "
+            "Cluster names must contain only lowercase letters, digits, and hyphens."
         )
 
     settings = load_settings()
-    if experiment:
-        settings.experiment = experiment
+    if cluster:
+        settings.cluster = cluster
     human_log, json_log = configure_logging(
-        settings, agent_name="cluster", experiment=experiment
+        settings, agent_name="cluster", cluster=cluster
     )
     log = structlog.get_logger(__name__)
 
@@ -44,12 +45,9 @@ async def _start(experiment: str) -> None:
     if json_log:
         typer.echo(f"JSON log  : {json_log}")
 
-    agents_config = load_agents_config(
-        settings.agents_config_path, experiment=experiment
-    )
+    agents_config = load_agents_config(agents_config_path(settings))
     mcp_config = load_mcp_config(
-        settings.mcp_config_path, settings.mcp_secrets_path,
-        experiment=experiment,
+        mcp_config_path(settings), mcp_secrets_path(settings),
     )
 
     if not agents_config.agents:
@@ -131,11 +129,11 @@ async def _start(experiment: str) -> None:
 
 
 def start_command(
-    experiment: str = typer.Option(
+    cluster: str = typer.Option(
         "",
-        "--experiment",
-        "-e",
-        help="Experiment label included in run log filenames.",
+        "--cluster",
+        "-c",
+        help="Cluster name — loads configuration from clusters/{cluster}/.",
     ),
 ) -> None:
     """Start all agents defined in agents.toml concurrently.
@@ -146,10 +144,10 @@ def start_command(
     on Ctrl-C.
 
     Args:
-        experiment: Optional experiment label for log filenames.
+        cluster: Optional cluster name for configuration resolution.
     """
     try:
-        asyncio.run(_start(experiment))
+        asyncio.run(_start(cluster))
     except KeyboardInterrupt:
         print("\nCluster stopped.", file=sys.stderr)
         sys.exit(0)

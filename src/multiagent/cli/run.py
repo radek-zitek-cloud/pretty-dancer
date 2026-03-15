@@ -13,6 +13,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
 from multiagent.config.mcp import load_mcp_config
+from multiagent.config.settings import agents_config_path, mcp_config_path, mcp_secrets_path
 from multiagent.core.agent import LLMAgent
 from multiagent.core.costs import CostLedger
 from multiagent.core.routing import build_router
@@ -25,19 +26,19 @@ from multiagent.transport import create_transport
 
 async def _run(
     agent_name: str,
-    experiment: str,
+    cluster: str,
 ) -> None:
     """Async entry point for the run command."""
-    if experiment and not re.match(r"^[a-z0-9-]+$", experiment):
+    if cluster and not re.match(r"^[a-z0-9-]+$", cluster):
         raise typer.BadParameter(
-            f"Invalid experiment name '{experiment}'. "
-            "Experiment names must contain only lowercase letters, digits, and hyphens."
+            f"Invalid cluster name '{cluster}'. "
+            "Cluster names must contain only lowercase letters, digits, and hyphens."
         )
 
     settings = load_settings()
-    if experiment:
-        settings.experiment = experiment
-    human_log, json_log = configure_logging(settings, agent_name=agent_name, experiment=experiment)
+    if cluster:
+        settings.cluster = cluster
+    human_log, json_log = configure_logging(settings, agent_name=agent_name, cluster=cluster)
     log = structlog.get_logger(__name__)
 
     if human_log:
@@ -45,19 +46,17 @@ async def _run(
     if json_log:
         typer.echo(f"JSON log  : {json_log}")
 
-    agents_config = load_agents_config(
-        settings.agents_config_path, experiment=experiment
-    )
+    config_path = agents_config_path(settings)
+    agents_config = load_agents_config(config_path)
     if agent_name not in agents_config.agents:
         raise typer.BadParameter(
-            f"Agent '{agent_name}' not found in {settings.agents_config_path}. "
+            f"Agent '{agent_name}' not found in {config_path}. "
             f"Available: {', '.join(sorted(agents_config.agents.keys()))}"
         )
 
     agent_config = agents_config.agents[agent_name]
     mcp_config = load_mcp_config(
-        settings.mcp_config_path, settings.mcp_secrets_path,
-        experiment=experiment,
+        mcp_config_path(settings), mcp_secrets_path(settings),
     )
 
     # Validate tool references
@@ -112,11 +111,11 @@ async def _run(
 
 def run_command(
     agent_name: str = typer.Argument(..., help="Name of the agent to run."),
-    experiment: str = typer.Option(
+    cluster: str = typer.Option(
         "",
-        "--experiment",
-        "-e",
-        help="Experiment label included in run log filenames.",
+        "--cluster",
+        "-c",
+        help="Cluster name — loads configuration from clusters/{cluster}/.",
     ),
 ) -> None:
     """Start a named agent and poll for messages indefinitely.
@@ -126,10 +125,10 @@ def run_command(
 
     Args:
         agent_name: The agent name as declared in agents.toml.
-        experiment: Optional experiment label for log filenames.
+        cluster: Optional cluster name for configuration resolution.
     """
     try:
-        asyncio.run(_run(agent_name, experiment))
+        asyncio.run(_run(agent_name, cluster))
     except KeyboardInterrupt:
         log = structlog.get_logger(__name__)
         log.info("shutdown", reason="keyboard_interrupt")

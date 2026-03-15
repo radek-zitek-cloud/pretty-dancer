@@ -65,7 +65,7 @@ class Settings(BaseSettings):
         "DEBUG",
         pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
         description="Minimum log level for the JSONL log file. Defaults to DEBUG to "
-        "capture maximum detail for experiment analysis.",
+        "capture maximum detail for cluster analysis.",
     )
 
     # Observability — shared
@@ -79,10 +79,16 @@ class Settings(BaseSettings):
         "Never emitted to console or human-readable file. "
         "Only effective when log_json_file_enabled=True.",
     )
-    experiment: str = Field(
+
+    # Cluster configuration
+    cluster: str = Field(
         "",
-        description="Optional experiment label included in log filenames. "
-        "Override per-run with the --experiment CLI flag.",
+        description="Cluster name. Loads configuration from clusters/{cluster}/. "
+        "Empty string loads clusters/default/.",
+    )
+    clusters_dir: Path = Field(
+        Path("clusters"),
+        description="Root directory containing cluster configurations.",
     )
 
     # Transport
@@ -118,30 +124,6 @@ class Settings(BaseSettings):
     )
     llm_max_tokens: int = Field(16384, ge=1, le=1000000, description="Maximum response tokens.")
     llm_timeout_seconds: float = Field(30.0, gt=0, description="LLM call timeout in seconds.")
-
-    # Prompts
-    prompts_dir: Path = Field(
-        Path("prompts"),
-        description="Directory containing agent system prompt .md files. "
-        "Each agent loads {prompts_dir}/{agent_name}.md at construction.",
-    )
-
-    # MCP tools
-    mcp_config_path: Path = Field(
-        Path("agents.mcp.json"),
-        description="Path to MCP server configuration file.",
-    )
-    mcp_secrets_path: Path = Field(
-        Path("agents.mcp.secrets.json"),
-        description="Path to MCP server secrets file (gitignored).",
-    )
-
-    # Agent wiring
-    agents_config_path: Path = Field(
-        Path("agents.toml"),
-        description="Path to the agents configuration file. "
-        "Declares all agents and their next_agent routing.",
-    )
 
     # Checkpointer
     checkpointer_db_path: Path = Field(
@@ -182,6 +164,51 @@ class Settings(BaseSettings):
         ...,
         description="Demonstrates a required secret with no default. Must be in .env.",
     )
+
+
+def cluster_dir(settings: Settings) -> Path:
+    """Return the directory for the current cluster."""
+    name = settings.cluster if settings.cluster else "default"
+    return settings.clusters_dir / name
+
+
+def agents_config_path(settings: Settings) -> Path:
+    """Return the agents.toml path for the current cluster.
+
+    Raises:
+        InvalidConfigurationError: If the config file does not exist.
+    """
+    name = settings.cluster if settings.cluster else "default"
+    path = settings.clusters_dir / name / "agents.toml"
+    if not path.exists():
+        raise InvalidConfigurationError(
+            f"Cluster config not found: {path}. "
+            f"Create clusters/{name}/agents.toml to define this cluster."
+        )
+    return path
+
+
+def mcp_config_path(settings: Settings) -> Path:
+    """Return the MCP config path for the current cluster."""
+    name = settings.cluster if settings.cluster else "default"
+    return settings.clusters_dir / name / "agents.mcp.json"
+
+
+def mcp_secrets_path(settings: Settings) -> Path | None:
+    """Return secrets path, falling back to default cluster secrets."""
+    name = settings.cluster if settings.cluster else "default"
+    cluster_secrets = settings.clusters_dir / name / "agents.mcp.secrets.json"
+    if cluster_secrets.exists():
+        return cluster_secrets
+    default_secrets = settings.clusters_dir / "default" / "agents.mcp.secrets.json"
+    if default_secrets.exists():
+        return default_secrets
+    return None
+
+
+def prompts_dir(settings: Settings) -> Path:
+    """Return the prompts directory for the current cluster."""
+    return cluster_dir(settings) / "prompts"
 
 
 def load_settings() -> Settings:

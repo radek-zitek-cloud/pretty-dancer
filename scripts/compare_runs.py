@@ -54,11 +54,11 @@ def _run_summary(path: Path, events: list[dict[str, object]]) -> str:
     first_ts = str(events[0].get("timestamp", "?"))
     last_ts = str(events[-1].get("timestamp", "?"))
     agents = sorted({str(e.get("agent", "")) for e in events if e.get("agent")})
-    experiment = str(events[0].get("experiment", "")) if events[0].get("experiment") else "(none)"
+    cluster = str(events[0].get("cluster", "")) if events[0].get("cluster") else "(none)"
     return (
         f"File: {path.name}\n"
         f"Duration: {first_ts} → {last_ts}\n"
-        f"Experiment: {experiment}\n"
+        f"Cluster: {cluster}\n"
         f"Agents: {', '.join(agents) if agents else '(none)'}\n"
         f"Events: {len(events)}"
     )
