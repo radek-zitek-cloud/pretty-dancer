@@ -124,6 +124,8 @@ db-clear:
 
 # ── ChromaDB scripts ──────────────────────────────────────────────────────
 
+# Rebuild Chroma collection from scratch (use after ingest_docs.py changes):
+#   uv run python scripts/ingest_docs.py --reset
 ingest:
     uv run python scripts/ingest_docs.py
 
