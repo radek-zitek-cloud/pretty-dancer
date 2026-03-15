@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS cost_ledger (
     input_unit_price  REAL    NOT NULL,
     output_unit_price REAL    NOT NULL,
     cost_usd          REAL    NOT NULL,
-    experiment        TEXT    NOT NULL DEFAULT ''
+    cluster           TEXT    NOT NULL DEFAULT ''
 )
 """
 
@@ -37,7 +37,7 @@ INSERT INTO cost_ledger (
     timestamp, thread_id, agent, model,
     input_tokens, output_tokens, total_tokens,
     input_unit_price, output_unit_price, cost_usd,
-    experiment
+    cluster
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
@@ -57,7 +57,7 @@ class CostEntry:
         input_unit_price: Price per input token in USD.
         output_unit_price: Price per output token in USD.
         cost_usd: Computed cost in USD.
-        experiment: Optional experiment label.
+        cluster: Optional cluster label.
     """
 
     timestamp: str
@@ -70,7 +70,7 @@ class CostEntry:
     input_unit_price: float
     output_unit_price: float
     cost_usd: float
-    experiment: str = ""
+    cluster: str = ""
 
 
 class CostLedger:
@@ -108,9 +108,22 @@ class CostLedger:
             await self._conn.close()
 
     async def _init_schema(self) -> None:
-        """Create the cost_ledger table if it does not exist."""
-        if self._conn:
-            await self._conn.execute(_CREATE_TABLE)
+        """Create the cost_ledger table if it does not exist.
+
+        Also migrates the old 'experiment' column to 'cluster' if present.
+        """
+        if not self._conn:
+            return
+        await self._conn.execute(_CREATE_TABLE)
+        await self._conn.commit()
+
+        # Migrate old schema: rename experiment → cluster
+        columns = await self._conn.execute("PRAGMA table_info(cost_ledger)")
+        col_names = [row[1] for row in await columns.fetchall()]
+        if "experiment" in col_names and "cluster" not in col_names:
+            await self._conn.execute(
+                "ALTER TABLE cost_ledger RENAME COLUMN experiment TO cluster"
+            )
             await self._conn.commit()
 
     async def record(self, entry: CostEntry) -> None:
@@ -138,7 +151,7 @@ class CostLedger:
                     entry.input_unit_price,
                     entry.output_unit_price,
                     entry.cost_usd,
-                    entry.experiment,
+                    entry.cluster,
                 ),
             )
             await self._conn.commit()
