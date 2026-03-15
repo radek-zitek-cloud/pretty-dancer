@@ -28,6 +28,7 @@ from textual.widgets.option_list import Option
 
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
+from multiagent.config.settings import agents_config_path
 from multiagent.transport.base import Message
 
 _POLL_SECONDS = 2.0
@@ -453,7 +454,7 @@ class MonitorApp(App[None]):
         cost_db_path: Path,
         agent_names: list[str],
         poll_interval: float,
-        experiment: str = "",
+        cluster: str = "",
         initial_thread: str = "",
     ) -> None:
         super().__init__()
@@ -461,7 +462,7 @@ class MonitorApp(App[None]):
         self._cost_db_path = cost_db_path
         self._agent_names = agent_names
         self._poll_interval = poll_interval
-        self._experiment = experiment
+        self._cluster = cluster
         self._initial_thread = initial_thread
         self._agents_conn: aiosqlite.Connection | None = None
         self._cost_conn: aiosqlite.Connection | None = None
@@ -502,8 +503,8 @@ class MonitorApp(App[None]):
         else:
             self._cost_conn = None
 
-        if self._experiment:
-            self.sub_title = f"experiment: {self._experiment}"
+        if self._cluster:
+            self.sub_title = f"cluster: {self._cluster}"
 
         # Initial refresh then start polling
         await self._refresh_all()
@@ -589,24 +590,24 @@ class MonitorApp(App[None]):
             except Exception:
                 pass
 
-        # Experiment filter
-        experiment_threads: set[str] | None = None
-        if self._experiment and self._cost_conn:
+        # Cluster filter
+        cluster_threads: set[str] | None = None
+        if self._cluster and self._cost_conn:
             try:
                 exp_cursor = await self._cost_conn.execute(
                     "SELECT DISTINCT thread_id FROM cost_ledger "
-                    "WHERE experiment = ?",
-                    (self._experiment,),
+                    "WHERE cluster = ?",
+                    (self._cluster,),
                 )
                 exp_rows = await exp_cursor.fetchall()
-                experiment_threads = {str(r["thread_id"]) for r in exp_rows}
+                cluster_threads = {str(r["thread_id"]) for r in exp_rows}
             except Exception:
                 pass
 
         threads: list[dict[str, Any]] = []
         for r in rows:
             tid = str(r["thread_id"])
-            if experiment_threads is not None and tid not in experiment_threads:
+            if cluster_threads is not None and tid not in cluster_threads:
                 continue
             threads.append({
                 "thread_id": tid,
@@ -715,11 +716,11 @@ class MonitorApp(App[None]):
         if not self._cost_conn:
             return
         try:
-            if self._experiment:
+            if self._cluster:
                 cursor = await self._cost_conn.execute(
                     "SELECT SUM(cost_usd) as total FROM cost_ledger "
-                    "WHERE experiment = ?",
-                    (self._experiment,),
+                    "WHERE cluster = ?",
+                    (self._cluster,),
                 )
             else:
                 cursor = await self._cost_conn.execute(
@@ -728,9 +729,9 @@ class MonitorApp(App[None]):
             row = await cursor.fetchone()
             total = float(row["total"]) if row and row["total"] else 0.0
             cost_str = f"${total:.4f}"
-            if self._experiment:
+            if self._cluster:
                 self.sub_title = (
-                    f"experiment: {self._experiment}  —  {cost_str}"
+                    f"cluster: {self._cluster}  —  {cost_str}"
                 )
             else:
                 self.sub_title = cost_str
@@ -739,11 +740,11 @@ class MonitorApp(App[None]):
 
 
 def monitor_command(
-    experiment: str = typer.Option(
+    cluster: str = typer.Option(
         "",
-        "--experiment",
-        "-e",
-        help="Filter threads by experiment label.",
+        "--cluster",
+        "-c",
+        help="Filter threads by cluster label.",
     ),
     thread_id: str = typer.Option(
         "",
@@ -757,9 +758,9 @@ def monitor_command(
     Provides a live dashboard showing agent status, message threads,
     cost tracking, and an inline send panel. Requires SQLite transport.
     """
-    if isinstance(experiment, str) and experiment and not re.match(r"^[a-z0-9-]+$", experiment):  # type: ignore[reportUnnecessaryIsInstance]
+    if isinstance(cluster, str) and cluster and not re.match(r"^[a-z0-9-]+$", cluster):  # type: ignore[reportUnnecessaryIsInstance]
         print(
-            f"Error: Invalid experiment name '{experiment}'. "
+            f"Error: Invalid cluster name '{cluster}'. "
             "Must contain only lowercase letters, digits, and hyphens.",
             file=sys.stderr,
         )
@@ -783,12 +784,10 @@ def monitor_command(
         )
         raise SystemExit(1)
 
-    if experiment:
-        settings.experiment = experiment
+    if cluster:
+        settings.cluster = cluster
 
-    agents_config = load_agents_config(
-        settings.agents_config_path, experiment=experiment
-    )
+    agents_config = load_agents_config(agents_config_path(settings))
     agent_names = list(agents_config.agents.keys())
 
     app = MonitorApp(
@@ -796,7 +795,7 @@ def monitor_command(
         cost_db_path=settings.cost_db_path,
         agent_names=agent_names,
         poll_interval=settings.sqlite_poll_interval_seconds,
-        experiment=experiment,
+        cluster=cluster,
         initial_thread=thread_id,
     )
     app.run()

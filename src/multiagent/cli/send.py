@@ -10,6 +10,7 @@ import typer
 
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
+from multiagent.config.settings import agents_config_path
 from multiagent.transport import create_transport
 from multiagent.transport.base import Message
 
@@ -22,10 +23,10 @@ def send_command(
         "--thread-id", "-t",
         help="Existing thread UUID to continue. Omit to start a new thread.",
     ),
-    experiment: str = typer.Option(
+    cluster: str = typer.Option(
         "",
-        "--experiment", "-e",
-        help="Experiment name — validates agent against experiment config.",
+        "--cluster", "-c",
+        help="Cluster name — validates agent against cluster config.",
     ),
 ) -> None:
     """Inject a message into the transport addressed to a named agent.
@@ -37,24 +38,26 @@ def send_command(
         agent_name: The target agent name as declared in agents.toml.
         body: The message body to deliver.
         thread_id: Optional existing thread UUID to continue.
-        experiment: Optional experiment name for config resolution.
+        cluster: Optional cluster name for config resolution.
     """
-    if experiment and not re.match(r"^[a-z0-9-]+$", experiment):
+    if cluster and not re.match(r"^[a-z0-9-]+$", cluster):
         raise typer.BadParameter(
-            f"Invalid experiment name '{experiment}'. "
-            "Experiment names must contain only lowercase letters, "
+            f"Invalid cluster name '{cluster}'. "
+            "Cluster names must contain only lowercase letters, "
             "digits, and hyphens."
         )
 
     settings = load_settings()
-    agents_config = load_agents_config(
-        settings.agents_config_path, experiment=experiment
-    )
+    if cluster:
+        settings.cluster = cluster
 
-    if agent_name not in agents_config.agents:
+    config_path = agents_config_path(settings)
+    agents_cfg = load_agents_config(config_path)
+
+    if agent_name not in agents_cfg.agents:
         raise typer.BadParameter(
-            f"Agent '{agent_name}' not found in {settings.agents_config_path}. "
-            f"Available: {', '.join(sorted(agents_config.agents.keys()))}"
+            f"Agent '{agent_name}' not found in {config_path}. "
+            f"Available: {', '.join(sorted(agents_cfg.agents.keys()))}"
         )
 
     resolved_thread_id: str | None = None

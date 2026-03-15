@@ -19,6 +19,7 @@ from rich.panel import Panel
 
 from multiagent.config import load_settings
 from multiagent.config.agents import load_agents_config
+from multiagent.config.settings import agents_config_path
 from multiagent.transport import Transport, create_transport
 from multiagent.transport.base import Message
 
@@ -144,30 +145,32 @@ def chat_command(
         "-t",
         help="Existing thread UUID. Omit to start a new thread.",
     ),
-    experiment: str = typer.Option(
+    cluster: str = typer.Option(
         "",
-        "--experiment",
-        "-e",
-        help="Optional experiment label.",
+        "--cluster",
+        "-c",
+        help="Cluster name — loads configuration from clusters/{cluster}/.",
     ),
 ) -> None:
     """Start an interactive chat session with a named agent."""
     settings = load_settings()
-    if experiment and not re.match(r"^[a-z0-9-]+$", experiment):
+    if cluster and not re.match(r"^[a-z0-9-]+$", cluster):
         raise typer.BadParameter(
-            f"Invalid experiment name '{experiment}'. "
-            "Experiment names must contain only lowercase letters, "
+            f"Invalid cluster name '{cluster}'. "
+            "Cluster names must contain only lowercase letters, "
             "digits, and hyphens."
         )
 
-    agents_config = load_agents_config(
-        settings.agents_config_path, experiment=experiment
-    )
+    if cluster:
+        settings.cluster = cluster
 
-    if agent_name not in agents_config.agents:
+    config_path = agents_config_path(settings)
+    agents_cfg = load_agents_config(config_path)
+
+    if agent_name not in agents_cfg.agents:
         raise typer.BadParameter(
-            f"Agent '{agent_name}' not found in {settings.agents_config_path}. "
-            f"Available: {', '.join(sorted(agents_config.agents.keys()))}"
+            f"Agent '{agent_name}' not found in {config_path}. "
+            f"Available: {', '.join(sorted(agents_cfg.agents.keys()))}"
         )
 
     if thread_id:
@@ -180,9 +183,6 @@ def chat_command(
             ) from None
     else:
         thread_id = str(uuid_module.uuid4())
-
-    if experiment:
-        settings.experiment = experiment
 
     transport = create_transport(settings)
     db_path = str(settings.sqlite_db_path)
