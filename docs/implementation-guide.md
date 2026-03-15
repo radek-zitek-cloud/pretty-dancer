@@ -20,13 +20,14 @@
 8. [Transport Contract](#8-transport-contract)
 9. [Agent Contract](#9-agent-contract)
 10. [Routing Contract](#10-routing-contract)
-11. [Exception Hierarchy](#11-exception-hierarchy)
-12. [Python Standards](#12-python-standards)
-13. [Testing Strategy](#13-testing-strategy)
-14. [Scripts and Inspection Tools](#14-scripts-and-inspection-tools)
-15. [Git Workflow](#15-git-workflow)
-16. [Task Runner Reference](#16-task-runner-reference)
-17. [Dependency Reference](#17-dependency-reference)
+11. [MCP Tool Integration](#11-mcp-tool-integration)
+12. [Exception Hierarchy](#12-exception-hierarchy)
+13. [Python Standards](#13-python-standards)
+14. [Testing Strategy](#14-testing-strategy)
+15. [Scripts and Inspection Tools](#15-scripts-and-inspection-tools)
+16. [Git Workflow](#16-git-workflow)
+17. [Task Runner Reference](#17-task-runner-reference)
+18. [Dependency Reference](#18-dependency-reference)
 
 ---
 
@@ -565,7 +566,106 @@ message.
 
 ---
 
-## 11. Exception Hierarchy
+## 11. MCP Tool Integration
+
+Agents can access external tools via the Model Context Protocol (MCP). MCP
+servers are subprocess-based tool providers that expose capabilities (web
+search, file system access, database queries) to agents at runtime.
+
+### 11.1 Configuration Files
+
+Each cluster has two MCP configuration files:
+
+| File | Committed | Purpose |
+|---|---|---|
+| `agents.mcp.json` | Yes | Server definitions: command, args, transport |
+| `agents.mcp.secrets.json` | No (gitignored) | Credentials: env vars merged into server config |
+| `agents.mcp.secrets.example.json` | Yes | Documents required secret keys |
+
+### 11.2 `agents.mcp.json` Schema
+
+```json
+{
+  "mcpServers": {
+    "exa": {
+      "command": "npx",
+      "args": ["-y", "exa-mcp-server"],
+      "env": {},
+      "transport": "stdio"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./data"]
+    }
+  }
+}
+```
+
+Each server entry produces an `MCPServerConfig(command, args, env, transport)`.
+The `transport` field defaults to `"stdio"`.
+
+### 11.3 Secrets Merging
+
+Secrets are loaded from `agents.mcp.secrets.json` and merged into the
+corresponding server's `env` dict. Secret values override base env values
+for the same key. The secrets file is optional — if absent, servers run
+without env overrides.
+
+Named clusters fall back to `clusters/default/agents.mcp.secrets.json` when
+no cluster-specific secrets file exists. This allows shared API keys without
+duplication.
+
+### 11.4 Wiring Tools to Agents
+
+In `agents.toml`, an agent declares which MCP servers it uses:
+
+```toml
+[agents.fundamentals]
+next_agent = "supervisor"
+tools = ["exa"]            # references key in agents.mcp.json
+```
+
+At startup, the CLI validates that every tool name referenced by an agent
+exists in the loaded `MCPConfig`. Missing tool references raise
+`ConfigurationError`.
+
+### 11.5 Graph Structure with Tools (ReAct Pattern)
+
+When an agent has `tool_configs`, the LangGraph graph uses a ReAct loop:
+
+```
+llm → should_continue → tools → llm → ... → END
+```
+
+1. The LLM is invoked with tools bound via `ChatOpenAI.bind_tools()`
+2. If the LLM response contains `tool_calls`, execution routes to the
+   `ToolNode` which executes the tool and returns results
+3. The LLM is invoked again with the tool results in the message history
+4. This loop repeats until the LLM produces a response without tool calls
+5. If a router is configured, routing runs after the tool loop completes
+
+Agents without tools use a pre-built graph (constructed once at init).
+Agents with tools rebuild the graph on each `run()` call because MCP
+tool availability may change between calls.
+
+### 11.6 MCP Server Lifecycle
+
+MCP servers are subprocess-based. `MultiServerMCPClient` from
+`langchain-mcp-adapters` manages the subprocess lifecycle. Server stderr
+is redirected to `logs/mcp-servers.log` to prevent console noise.
+
+### 11.7 Adding a New Tool Server
+
+1. Add the server definition to the cluster's `agents.mcp.json`
+2. If the server needs credentials, add the env keys to
+   `agents.mcp.secrets.example.json` and set values in
+   `agents.mcp.secrets.json`
+3. Reference the server name in the agent's `tools` list in `agents.toml`
+4. No code changes required — the wiring is entirely declarative
+
+---
+
+## 12. Exception Hierarchy
 
 All custom exceptions live exclusively in `src/multiagent/exceptions.py`.
 
@@ -597,24 +697,24 @@ MultiAgentError
 
 ---
 
-## 12. Python Standards
+## 13. Python Standards
 
-### 12.1 Type Annotations
+### 13.1 Type Annotations
 
 Mandatory on every function, method, and class attribute. `pyright` strict mode
 enforces this. No `Any` without a justifying comment.
 
-### 12.2 Docstrings
+### 13.2 Docstrings
 
 Google style. Every public module, class, and method. Private methods where logic
 is non-obvious. `ruff` does not enforce docstrings — followed by convention only.
 
-### 12.3 Comments
+### 13.3 Comments
 
 Explain **why**, not **what**. If a comment describes what the next line does,
 rewrite the line to be self-documenting.
 
-### 12.4 Naming
+### 13.4 Naming
 
 | Element | Convention |
 |---|---|
@@ -625,31 +725,31 @@ rewrite the line to be self-documenting.
 | Private | `_single_prefix` |
 | Type alias | `PascalCase` |
 
-### 12.5 Import Rules
+### 13.5 Import Rules
 
 Absolute imports only — no relative imports. `ruff` enforces order:
 stdlib → third-party → local. No star imports.
 
-### 12.6 `print()` Usage
+### 13.6 `print()` Usage
 
 `print()` and `typer.echo()` are acceptable in `cli/` and `scripts/`. They must
 never appear in `core/` or `transport/`. All diagnostic output in library code
 goes through `structlog`.
 
-### 12.7 Path Handling
+### 13.7 Path Handling
 
 `pathlib.Path` everywhere. No string path concatenation. `Path.mkdir(parents=True,
 exist_ok=True)` before any file creation. Required for Windows compatibility.
 
-### 12.8 Datetime
+### 13.8 Datetime
 
 Use `datetime.now(UTC)` (Python 3.12+). Never `datetime.utcnow()` (deprecated).
 
 ---
 
-## 13. Testing Strategy
+## 14. Testing Strategy
 
-### 13.1 Two Tiers
+### 14.1 Two Tiers
 
 **Unit tests** (`tests/unit/`) — fast, mocked, no LLM calls, no file I/O except
 `tmp_path` SQLite databases. All new behaviour must have unit test coverage.
@@ -657,7 +757,7 @@ Use `datetime.now(UTC)` (Python 3.12+). Never `datetime.utcnow()` (deprecated).
 **Integration tests** (`tests/integration/`) — real LLM calls, real databases.
 Gated by `@pytest.mark.integration`. Require `OPENROUTER_API_KEY`.
 
-### 13.2 Mock Boundaries
+### 14.2 Mock Boundaries
 
 | Component | Unit test approach |
 |---|---|
@@ -666,7 +766,7 @@ Gated by `@pytest.mark.integration`. Require `OPENROUTER_API_KEY`.
 | Checkpointer | `MemorySaver()` — never `AsyncSqliteSaver` in unit tests |
 | Cost ledger | `mock_cost_ledger` fixture (`AsyncMock(spec=CostLedger)`) |
 
-### 13.3 Shared Fixtures (`conftest.py`)
+### 14.3 Shared Fixtures (`conftest.py`)
 
 | Fixture | Purpose |
 |---|---|
@@ -677,37 +777,37 @@ Gated by `@pytest.mark.integration`. Require `OPENROUTER_API_KEY`.
 | `sqlite_transport` | Real `SQLiteTransport` against `tmp_path` database |
 | `mock_cost_ledger` | `AsyncMock(spec=CostLedger)` |
 
-### 13.4 Script Tests
+### 14.4 Script Tests
 
 Scripts are tested via `subprocess.run`. Override database paths via environment
 variables (`SQLITE_DB_PATH`, `COST_DB_PATH`) in the subprocess env — never via
 `--db` flags. Use `tmp_path` databases with known content.
 
-### 13.5 Test the Failure Path
+### 14.5 Test the Failure Path
 
 Every component with a graceful failure mode must have a test asserting that
 failure does not propagate — cost ledger, shutdown monitor, routing fallback.
 
 ---
 
-## 14. Scripts and Inspection Tools
+## 15. Scripts and Inspection Tools
 
-### 14.1 What Scripts Are
+### 15.1 What Scripts Are
 
 Scripts in `scripts/` are developer inspection tools, not CLI commands. Run
 directly: `uv run python scripts/show_thread.py`. All have `just` targets.
 
-### 14.2 Database Path Contract
+### 15.2 Database Path Contract
 
 Scripts read database paths from `Settings()` only. No `--db` flag, no hardcoded
 paths. This is non-negotiable.
 
-### 14.3 Graceful Degradation
+### 15.3 Graceful Degradation
 
 Scripts must never crash when a database does not exist or is empty. Missing
 `costs.db` means cost tracking has not run — show `—` in cost columns.
 
-### 14.4 Current Scripts
+### 15.4 Current Scripts
 
 | Script | Purpose | `just` target |
 |---|---|---|
@@ -720,9 +820,9 @@ Scripts must never crash when a database does not exist or is empty. Missing
 
 ---
 
-## 15. Git Workflow
+## 16. Git Workflow
 
-### 15.1 Branching Strategy
+### 16.1 Branching Strategy
 
 ```
 master          # always clean, Radek merges here
@@ -734,7 +834,7 @@ docs/<slug>     # documentation only
 
 Work is always on a feature branch. `master` is never worked on directly.
 
-### 15.2 Branch Lifecycle
+### 16.2 Branch Lifecycle
 
 ```bash
 # Start
@@ -754,7 +854,7 @@ git branch -d feature/<slug>
 **Radek is the only person who merges to master. Tom pushes his branch
 and reports completion.**
 
-### 15.3 Commit Convention
+### 16.3 Commit Convention
 
 ```
 <type>(<scope>): <short summary>
@@ -768,13 +868,13 @@ fix(core): handle empty LLM response in AgentRunner
 test(core): add unit tests for LLMAgent cost recording
 ```
 
-### 15.4 Pre-Branch Hygiene
+### 16.4 Pre-Branch Hygiene
 
 Before starting any task: `git status` — master must be clean. If uncommitted
 changes exist, stage intentionally and commit before branching. Never start a
 feature branch from a dirty master.
 
-### 15.5 Plan Files
+### 16.5 Plan Files
 
 Implementation plans live in `tasks/plans/<task-id>-plan.md`. Committed to the
 feature branch. Updated to reflect architect feedback before implementation begins.
@@ -782,7 +882,7 @@ The plan should represent what was actually built, not the original draft.
 
 ---
 
-## 16. Task Runner Reference
+## 17. Task Runner Reference
 
 All development tasks run via `just`. Run `just` with no arguments to list targets.
 
@@ -830,7 +930,7 @@ Both must pass with zero errors before any task is considered done.
 
 ---
 
-## 17. Dependency Reference
+## 18. Dependency Reference
 
 | Package | Runtime/Dev | Purpose |
 |---|---|---|
@@ -838,6 +938,7 @@ Both must pass with zero errors before any task is considered done.
 | `langgraph-checkpoint-sqlite` | Runtime | SQLite LangGraph checkpointer |
 | `langchain-openai` | Runtime | `ChatOpenAI` for OpenRouter integration |
 | `langchain-core` | Runtime | `BaseMessage`, `SystemMessage`, `HumanMessage` |
+| `langchain-mcp-adapters` | Runtime | MCP tool integration via `MultiServerMCPClient` |
 | `pydantic` | Runtime | Data validation |
 | `pydantic-settings` | Runtime | Layered configuration, env file support |
 | `structlog` | Runtime | Structured logging, context binding |
