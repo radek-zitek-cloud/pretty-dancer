@@ -76,27 +76,7 @@ class AgentsConfig:
     routers: dict[str, RouterConfig]
 
 
-def resolve_experiment_path(
-    base_path: Path, experiment: str, label: str,
-) -> Path:
-    """Resolve a config path for the given experiment.
-
-    When experiment is non-empty, transforms `base.ext` into
-    `base.{experiment}.ext`. Raises ConfigurationError if the
-    resolved file does not exist.
-    """
-    if not experiment:
-        return base_path
-    resolved = base_path.parent / f"{base_path.stem}.{experiment}{base_path.suffix}"
-    if not resolved.exists():
-        raise InvalidConfigurationError(
-            f"Experiment {label} not found: {resolved}. "
-            f"Create this file to run the '{experiment}' experiment."
-        )
-    return resolved
-
-
-def load_agents_config(config_path: Path, experiment: str = "") -> AgentsConfig:
+def load_agents_config(config_path: Path) -> AgentsConfig:
     """Load agent and router configuration from a TOML file.
 
     Reads the agents.toml file and returns an AgentsConfig containing
@@ -108,7 +88,6 @@ def load_agents_config(config_path: Path, experiment: str = "") -> AgentsConfig:
 
     Args:
         config_path: Path to the agents TOML configuration file.
-        experiment: Experiment name for path resolution. Empty for default.
 
     Returns:
         AgentsConfig with agents and routers dicts populated.
@@ -118,7 +97,6 @@ def load_agents_config(config_path: Path, experiment: str = "") -> AgentsConfig:
             contains no [agents] table, or has invalid configuration
             (e.g. agent with both next_agent and router).
     """
-    config_path = resolve_experiment_path(config_path, experiment, "config")
     try:
         raw = config_path.read_bytes()
     except FileNotFoundError:

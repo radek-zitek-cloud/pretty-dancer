@@ -18,23 +18,21 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
 from multiagent.config.mcp import MCPServerConfig
-from multiagent.config.settings import Settings
+from multiagent.config.settings import Settings, prompts_dir
 from multiagent.core.costs import CostEntry, CostLedger
 from multiagent.core.routing import KeywordRouter, LLMRouter
 from multiagent.exceptions import AgentConfigurationError, AgentLLMError
 
 
 def _resolve_prompt_path(
-    prompts_dir: Path, agent_name: str, experiment: str,
+    prompt_dir: Path, agent_name: str,
 ) -> Path:
-    """Resolve system prompt path for the given agent and experiment.
+    """Resolve system prompt path for the given agent.
 
-    When experiment is set, looks in the experiment subdirectory first.
-    Falls back to the flat prompts directory if no experiment is set.
+    The prompts_dir already encodes the cluster, so only the agent
+    name needs to be resolved within it.
     """
-    if experiment:
-        return prompts_dir / experiment / f"{agent_name}.md"
-    return prompts_dir / f"{agent_name}.md"
+    return prompt_dir / f"{agent_name}.md"
 
 
 class AgentState(MessagesState):
@@ -90,9 +88,9 @@ class LLMAgent:
             # Explicit prompt path from agents.toml — use directly
             self._system_prompt = self._load_prompt_path(Path(prompt_name))
         else:
-            # Convention-based: experiment subdir if set, else flat
+            # Convention-based: resolve from cluster prompts dir
             prompt_path = _resolve_prompt_path(
-                settings.prompts_dir, name, settings.experiment
+                prompts_dir(settings), name,
             )
             self._system_prompt = self._load_prompt_path(prompt_path)
         self._checkpointer = checkpointer
@@ -224,7 +222,7 @@ class LLMAgent:
                 input_unit_price=input_unit_price,
                 output_unit_price=output_unit_price,
                 cost_usd=cost_usd,
-                experiment=self._settings.experiment,
+                cluster=self._settings.cluster,
             )
             try:
                 await self._cost_ledger.record(entry)
