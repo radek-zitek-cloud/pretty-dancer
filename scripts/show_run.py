@@ -1,4 +1,4 @@
-"""Parse a JSONL run file and display a structured experiment summary.
+"""Parse a JSONL run file and display a structured run summary.
 
 Usage: python scripts/show_run.py <log_file>
 
@@ -49,7 +49,7 @@ def main() -> None:
     first_ts = str(events[0].get("timestamp", "?"))
     last_ts = str(events[-1].get("timestamp", "?"))
     agents_seen = sorted({str(e.get("agent", "")) for e in events if e.get("agent")})
-    experiment = str(events[0].get("experiment", "")) if events[0].get("experiment") else ""
+    cluster = str(events[0].get("cluster", "")) if events[0].get("cluster") else ""
 
     meta_table = Table(title="Run Metadata", show_header=False)
     meta_table.add_column("Key", style="bold")
@@ -57,7 +57,7 @@ def main() -> None:
     meta_table.add_row("File", str(log_path))
     meta_table.add_row("Start", first_ts)
     meta_table.add_row("End", last_ts)
-    meta_table.add_row("Experiment", experiment or "(none)")
+    meta_table.add_row("Cluster", cluster or "(none)")
     meta_table.add_row("Agents", ", ".join(agents_seen) if agents_seen else "(none)")
     meta_table.add_row("Total events", str(len(events)))
     console.print(meta_table)
