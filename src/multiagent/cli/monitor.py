@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -756,6 +757,14 @@ def monitor_command(
     Provides a live dashboard showing agent status, message threads,
     cost tracking, and an inline send panel. Requires SQLite transport.
     """
+    if isinstance(experiment, str) and experiment and not re.match(r"^[a-z0-9-]+$", experiment):  # type: ignore[reportUnnecessaryIsInstance]
+        print(
+            f"Error: Invalid experiment name '{experiment}'. "
+            "Must contain only lowercase letters, digits, and hyphens.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
     settings = load_settings()
 
     if settings.transport_backend != "sqlite":
@@ -777,7 +786,9 @@ def monitor_command(
     if experiment:
         settings.experiment = experiment
 
-    agents_config = load_agents_config(settings.agents_config_path)
+    agents_config = load_agents_config(
+        settings.agents_config_path, experiment=experiment
+    )
     agent_names = list(agents_config.agents.keys())
 
     app = MonitorApp(
