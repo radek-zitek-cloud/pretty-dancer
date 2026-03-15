@@ -42,16 +42,16 @@ run agent experiment="":
     uv run multiagent run {{agent}} {{if experiment != "" { "--experiment " + experiment } else { "" }}}
 
 # Inject a message into the transport for a named agent
-send agent body:
-    uv run multiagent send {{agent}} "{{body}}"
+send agent body experiment="":
+    uv run multiagent send {{agent}} "{{body}}" {{if experiment != "" { "--experiment " + experiment } else { "" }}}
 
 # Listen for messages addressed to human
 listen thread_id="":
     uv run multiagent listen {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}}
 
 # Interactive chat session with an agent
-chat agent thread_id="":
-    uv run multiagent chat {{agent}} {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}}
+chat agent thread_id="" experiment="":
+    uv run multiagent chat {{agent}} {{if thread_id != "" { "--thread-id " + thread_id } else { "" }}} {{if experiment != "" { "--experiment " + experiment } else { "" }}}
 
 # Start all agents defined in agents.toml concurrently
 start experiment="":
@@ -121,6 +121,11 @@ db-agents:
 # Clear all messages from the transport database
 db-clear:
     sqlite3 data/agents.db "DELETE FROM messages;"
+
+# ── ChromaDB scripts ──────────────────────────────────────────────────────
+
+ingest:
+    uv run python scripts/ingest_docs.py
 
 # ── Inspection scripts ──────────────────────────────────────────────────────
 

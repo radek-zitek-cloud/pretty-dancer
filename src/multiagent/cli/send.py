@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid as uuid_module
 
 import typer
@@ -21,6 +22,11 @@ def send_command(
         "--thread-id", "-t",
         help="Existing thread UUID to continue. Omit to start a new thread.",
     ),
+    experiment: str = typer.Option(
+        "",
+        "--experiment", "-e",
+        help="Experiment name — validates agent against experiment config.",
+    ),
 ) -> None:
     """Inject a message into the transport addressed to a named agent.
 
@@ -31,9 +37,19 @@ def send_command(
         agent_name: The target agent name as declared in agents.toml.
         body: The message body to deliver.
         thread_id: Optional existing thread UUID to continue.
+        experiment: Optional experiment name for config resolution.
     """
+    if experiment and not re.match(r"^[a-z0-9-]+$", experiment):
+        raise typer.BadParameter(
+            f"Invalid experiment name '{experiment}'. "
+            "Experiment names must contain only lowercase letters, "
+            "digits, and hyphens."
+        )
+
     settings = load_settings()
-    agents_config = load_agents_config(settings.agents_config_path)
+    agents_config = load_agents_config(
+        settings.agents_config_path, experiment=experiment
+    )
 
     if agent_name not in agents_config.agents:
         raise typer.BadParameter(
